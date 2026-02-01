@@ -236,11 +236,14 @@ fn get_daily_summary(date: String, state: State<AppState>) -> Result<Vec<(String
             *summary.entry(record.task_name.clone()).or_insert(0) += duration;
         }
     }
-    
-    if let Ok(current) = state.current_record.lock() {
-        if let Some(record) = current.as_ref() {
-            let duration = (Local::now() - record.start_time).num_seconds();
-            *summary.entry(record.task_name.clone()).or_insert(0) += duration;
+
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    if date == today {
+        if let Ok(current) = state.current_record.lock() {
+            if let Some(record) = current.as_ref() {
+                let duration = (Local::now() - record.start_time).num_seconds();
+                *summary.entry(record.task_name.clone()).or_insert(0) += duration;
+            }
         }
     }
     
@@ -305,21 +308,24 @@ fn get_daily_records(date: String, state: State<AppState>) -> Result<Vec<TaskWit
         }
     }
     
-    // 進行中のタスクを追加
-    if let Ok(current) = state.current_record.lock() {
-        if let Some(record) = current.as_ref() {
-            let duration = (Local::now() - record.start_time).num_seconds();
-            
-            // 既存のタスクに追加するか、新規作成
-            if let Some(task_with_records) = result.iter_mut().find(|t| t.task_name == record.task_name) {
-                task_with_records.total_seconds += duration;
-                task_with_records.records.push(record.clone());
-            } else {
-                result.push(TaskWithRecords {
-                    task_name: record.task_name.clone(),
-                    total_seconds: duration,
-                    records: vec![record.clone()],
-                });
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    if date == today {
+        // 進行中のタスクを追加
+        if let Ok(current) = state.current_record.lock() {
+            if let Some(record) = current.as_ref() {
+                let duration = (Local::now() - record.start_time).num_seconds();
+
+                // 既存のタスクに追加するか、新規作成
+                if let Some(task_with_records) = result.iter_mut().find(|t| t.task_name == record.task_name) {
+                    task_with_records.total_seconds += duration;
+                    task_with_records.records.push(record.clone());
+                } else {
+                    result.push(TaskWithRecords {
+                        task_name: record.task_name.clone(),
+                        total_seconds: duration,
+                        records: vec![record.clone()],
+                    });
+                }
             }
         }
     }
@@ -406,25 +412,28 @@ fn copy_summary_to_clipboard(date: String, state: State<AppState>, app: AppHandl
         }
     }
     
-    // 進行中の作業があれば追加
-    if let Ok(current) = state.current_record.lock() {
-        if let Some(record) = current.as_ref() {
-            let duration = (Local::now() - record.start_time).num_seconds();
-            let start_str = record.start_time.format("%H:%M:%S");
-            let hours = duration / 3600;
-            let mins = (duration % 3600) / 60;
-            let secs = duration % 60;
-            
-            text.push_str(&format!("\n【{}】進行中...\n", record.task_name));
-            if hours > 0 {
-                text.push_str(&format!("  {} - 現在 ({}時間{}分{}秒経過)\n", 
-                    start_str, hours, mins, secs));
-            } else if mins > 0 {
-                text.push_str(&format!("  {} - 現在 ({}分{}秒経過)\n", 
-                    start_str, mins, secs));
-            } else {
-                text.push_str(&format!("  {} - 現在 ({}秒経過)\n", 
-                    start_str, secs));
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    if date == today {
+        // 進行中の作業があれば追加
+        if let Ok(current) = state.current_record.lock() {
+            if let Some(record) = current.as_ref() {
+                let duration = (Local::now() - record.start_time).num_seconds();
+                let start_str = record.start_time.format("%H:%M:%S");
+                let hours = duration / 3600;
+                let mins = (duration % 3600) / 60;
+                let secs = duration % 60;
+
+                text.push_str(&format!("\n【{}】進行中...\n", record.task_name));
+                if hours > 0 {
+                    text.push_str(&format!("  {} - 現在 ({}時間{}分{}秒経過)\n", 
+                        start_str, hours, mins, secs));
+                } else if mins > 0 {
+                    text.push_str(&format!("  {} - 現在 ({}分{}秒経過)\n", 
+                        start_str, mins, secs));
+                } else {
+                    text.push_str(&format!("  {} - 現在 ({}秒経過)\n", 
+                        start_str, secs));
+                }
             }
         }
     }
@@ -483,6 +492,36 @@ fn delete_task(task_id: String, state: State<AppState>) -> Result<(), String> {
     
     settings.tasks.retain(|t| t.id != task_id);
     save_settings(&data_dir, &settings)?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_all_data(state: State<AppState>) -> Result<(), String> {
+    let data_dir = state.data_dir.lock().map_err(|e| e.to_string())?;
+    
+    // 現在進行中のタスクをクリア
+    {
+        let mut current_record = state.current_record.lock().map_err(|e| e.to_string())?;
+        *current_record = None;
+    }
+    {
+        let mut last_task_id = state.last_task_id.lock().map_err(|e| e.to_string())?;
+        *last_task_id = None;
+    }
+    
+    // データディレクトリ内の日次ログファイル（*.json、settings.json以外）を削除
+    if let Ok(entries) = fs::read_dir(&*data_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                // settings.json以外の.jsonファイルを削除
+                if file_name.ends_with(".json") && file_name != "settings.json" {
+                    fs::remove_file(&path).ok();
+                }
+            }
+        }
+    }
     
     Ok(())
 }
@@ -640,6 +679,26 @@ fn update_record_details(
     } else {
         Err("Record not found".to_string())
     }
+}
+
+#[tauri::command]
+fn delete_record(
+    date: String,
+    record_id: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let data_dir = state.data_dir.lock().map_err(|e| e.to_string())?;
+    let mut log = load_daily_log(&data_dir, &date);
+    
+    let before_len = log.records.len();
+    log.records.retain(|r| r.id != record_id);
+    
+    if log.records.len() == before_len {
+        return Err("Record not found".to_string());
+    }
+    
+    save_daily_log(&data_dir, &log)?;
+    Ok(())
 }
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -859,7 +918,9 @@ pub fn run() {
             add_task,
             update_task,
             delete_task,
+            delete_all_data,
             update_record_details,
+            delete_record,
             get_summary_by_range,
             copy_period_summary_to_clipboard
         ])

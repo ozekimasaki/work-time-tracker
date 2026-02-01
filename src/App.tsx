@@ -15,7 +15,8 @@ import {
   ChevronDown,
   FileText,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  AlertTriangle
 } from 'lucide-react';
 import './App.css';
 import type { Task, WorkRecord, Settings as SettingsType, TaskWithRecords, PeriodSummary, SummaryViewMode } from './types';
@@ -24,6 +25,13 @@ function App() {
   const [settings, setSettings] = useState<SettingsType | null>(null);
   const [currentTask, setCurrentTask] = useState<WorkRecord | null>(null);
   const [dailyRecords, setDailyRecords] = useState<TaskWithRecords[]>([]);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [elapsedTime, setElapsedTime] = useState<number>(0);
   const [showSettings, setShowSettings] = useState(false);
@@ -40,6 +48,7 @@ function App() {
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
   const [currentMonthOffset, setCurrentMonthOffset] = useState(0);
   const [periodCopied, setPeriodCopied] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -66,23 +75,14 @@ function App() {
     }
   }, []);
 
-  const getLocalDateString = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
   const loadDailyRecords = useCallback(async () => {
     try {
-      const today = getLocalDateString();
-      const records = await invoke<TaskWithRecords[]>('get_daily_records', { date: today });
+      const records = await invoke<TaskWithRecords[]>('get_daily_records', { date: selectedDate });
       setDailyRecords(records);
     } catch (e) {
       console.error('Failed to load daily records:', e);
     }
-  }, []);
+  }, [selectedDate]);
 
   useEffect(() => {
     loadSettings();
@@ -124,8 +124,7 @@ function App() {
 
   const copySummary = async () => {
     try {
-      const today = getLocalDateString();
-      await invoke<string>('copy_summary_to_clipboard', { date: today });
+      await invoke<string>('copy_summary_to_clipboard', { date: selectedDate });
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
@@ -180,6 +179,18 @@ function App() {
     }
   };
 
+  const deleteAllData = async () => {
+    try {
+      await invoke('delete_all_data');
+      setShowDeleteConfirm(false);
+      setCurrentTask(null);
+      setElapsedTime(0);
+      await loadDailyRecords();
+    } catch (e) {
+      console.error('Failed to delete all data:', e);
+    }
+  };
+
   const startEditingRecord = (taskName: string, record: WorkRecord) => {
     setEditingRecord({ taskName, recordId: record.id });
     setRecordDetails(record.details || '');
@@ -187,9 +198,8 @@ function App() {
 
   const saveRecordDetails = async (_taskName: string, recordId: string) => {
     try {
-      const today = getLocalDateString();
       await invoke('update_record_details', { 
-        date: today, 
+        date: selectedDate, 
         recordId, 
         details: recordDetails.trim() || null 
       });
@@ -204,6 +214,21 @@ function App() {
   const cancelEditingRecord = () => {
     setEditingRecord(null);
     setRecordDetails('');
+  };
+
+  const deleteRecord = async (date: string, recordId: string) => {
+    if (!confirm('この記録を削除しますか？')) return;
+    try {
+      await invoke('delete_record', { date, recordId });
+      // 編集中なら解除
+      if (editingRecord?.recordId === recordId) {
+        setEditingRecord(null);
+        setRecordDetails('');
+      }
+      await loadDailyRecords();
+    } catch (e) {
+      console.error('Failed to delete record:', e);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -470,7 +495,37 @@ function App() {
               </button>
             </div>
           </div>
+
+          <div className="setting-item danger-zone">
+            <label><AlertTriangle size={16} /> データ管理</label>
+            <button className="danger-btn" onClick={() => setShowDeleteConfirm(true)}>
+              <Trash2 size={16} /> 過去のデータを全削除
+            </button>
+          </div>
         </section>
+      )}
+
+      {showDeleteConfirm && (
+        <div className="modal-overlay">
+          <div className="modal delete-confirm-modal">
+            <div className="modal-header">
+              <AlertTriangle size={24} className="warning-icon" />
+              <h3>警告</h3>
+            </div>
+            <div className="modal-body">
+              <p>すべての作業記録データが削除されます。</p>
+              <p className="warning-text">この操作は取り消せません。</p>
+            </div>
+            <div className="modal-actions">
+              <button className="cancel-btn" onClick={() => setShowDeleteConfirm(false)}>
+                キャンセル
+              </button>
+              <button className="confirm-delete-btn" onClick={deleteAllData}>
+                削除する
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <section className="daily-summary">
@@ -485,14 +540,27 @@ function App() {
         {summaryViewMode === 'daily' && (
           <>
             <div className="summary-header-row">
-              <span className="period-label">本日</span>
+              <div className="daily-date-row">
+                <span className="period-label">日付</span>
+                <input
+                  className="date-picker"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => {
+                    setSelectedDate(e.target.value);
+                    setExpandedTasks(new Set());
+                    setEditingRecord(null);
+                    setRecordDetails('');
+                  }}
+                />
+              </div>
               <button className={`copy-btn ${copied ? 'copied' : ''}`} onClick={copySummary}>
                 {copied ? <><Check size={16} /> コピー完了</> : <><Copy size={16} /> コピー</>}
               </button>
             </div>
             <div className="summary-list">
               {dailyRecords.length === 0 ? (
-                <div className="no-records">本日の記録はありません</div>
+                <div className="no-records">記録はありません</div>
               ) : (
                 dailyRecords.map((taskRecord) => (
                   <div key={taskRecord.task_name} className="task-record">
@@ -527,6 +595,9 @@ function App() {
                                   <div className="record-actions">
                                     <span className="record-duration">{record.duration_seconds ? formatDuration(record.duration_seconds) : formatDuration(Math.floor((Date.now() - new Date(record.start_time).getTime()) / 1000))}</span>
                                     <button className="edit-record-btn" onClick={() => startEditingRecord(taskRecord.task_name, record)} title="詳細を編集"><Edit2 size={14} /></button>
+                                    {record.end_time && (
+                                      <button className="delete-record-btn" onClick={() => deleteRecord(selectedDate, record.id)} title="記録を削除"><Trash2 size={14} /></button>
+                                    )}
                                   </div>
                                 </div>
                                 {record.details && <div className="record-details-text"><FileText size={12} /> {record.details}</div>}

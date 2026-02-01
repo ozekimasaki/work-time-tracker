@@ -14,6 +14,7 @@
   --color-border-light: #F0EEEB;     /* 薄いボーダー */
   --color-accent: #2D2D2D;           /* アクセント（ダークグレー） */
   --color-accent-subtle: rgba(45, 45, 45, 0.08);
+  --color-danger: #E53935;            /* 削除・警告用の赤 */
   
   /* タイポグラフィ */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
@@ -684,6 +685,19 @@ kbd {
   color: var(--color-text-primary);
 }
 
+.delete-record-btn {
+  padding: 4px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.delete-record-btn:hover {
+  color: var(--color-danger);
+}
+
 .record-details-text {
   display: flex;
   align-items: flex-start;
@@ -814,8 +828,23 @@ kbd {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-sm);
   padding: 0 var(--space-xs);
+}
+
+.daily-date-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.date-picker {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-size: 12px;
 }
 
 .period-nav {
@@ -839,6 +868,16 @@ kbd {
 .nav-btn:hover {
   border-color: var(--color-text-secondary);
   color: var(--color-text-secondary);
+}
+
+.nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.nav-btn:disabled:hover {
+  border-color: var(--color-border);
+  color: var(--color-text-tertiary);
 }
 
 .period-label {
@@ -870,4 +909,135 @@ kbd {
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);
+}
+
+/* ========================================
+   データ削除・警告ダイアログ
+   ======================================== */
+
+.danger-zone {
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.danger-zone label {
+  color: #D32F2F;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.danger-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: transparent;
+  border: 1px solid #D32F2F;
+  color: #D32F2F;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: var(--transition-fast);
+  margin-top: var(--space-xs);
+}
+
+.danger-btn:hover {
+  background: #D32F2F;
+  color: white;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--color-bg-elevated);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  max-width: 400px;
+  width: 90%;
+}
+
+.delete-confirm-modal .modal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.delete-confirm-modal .modal-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.delete-confirm-modal .warning-icon {
+  color: #D32F2F;
+}
+
+.delete-confirm-modal .modal-body {
+  padding: var(--space-md);
+}
+
+.delete-confirm-modal .modal-body p {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.delete-confirm-modal .warning-text {
+  color: #D32F2F;
+  font-weight: 500;
+}
+
+.delete-confirm-modal .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.delete-confirm-modal .cancel-btn {
+  padding: var(--space-xs) var(--space-md);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: var(--transition-fast);
+}
+
+.delete-confirm-modal .cancel-btn:hover {
+  background: var(--color-accent-subtle);
+}
+
+.delete-confirm-modal .confirm-delete-btn {
+  padding: var(--space-xs) var(--space-md);
+  background: #D32F2F;
+  border: none;
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: var(--transition-fast);
+}
+
+.delete-confirm-modal .confirm-delete-btn:hover {
+  background: #B71C1C;
 }
