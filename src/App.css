@@ -550,18 +550,21 @@ body {
 .shortcuts {
   display: flex;
   justify-content: center;
-  gap: var(--space-lg);
-  padding: var(--space-md);
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
   background: transparent;
   border-top: 1px solid var(--color-border);
+  flex-wrap: nowrap;
 }
 
 .shortcut {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   color: var(--color-text-tertiary);
-  font-size: 11px;
+  font-size: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 kbd {
