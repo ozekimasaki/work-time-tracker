@@ -12,6 +12,7 @@ export interface WorkRecord {
   start_time: string;
   end_time?: string;
   duration_seconds?: number;
+  details?: string;
 }
 
 export interface Settings {

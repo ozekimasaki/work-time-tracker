@@ -74,6 +74,7 @@ pub struct WorkRecord {
     pub start_time: DateTime<Local>,
     pub end_time: Option<DateTime<Local>>,
     pub duration_seconds: Option<i64>,
+    pub details: Option<String>,  // 作業詳細・メモ
 }
 
 // 日別ログ
@@ -107,6 +108,13 @@ export interface WorkRecord {
   start_time: string;
   end_time?: string;
   duration_seconds?: number;
+  details?: string;  // 作業詳細・メモ
+}
+
+export interface TaskWithRecords {
+  task_name: string;
+  total_seconds: number;
+  records: WorkRecord[];
 }
 
 export interface Settings {
@@ -143,11 +151,11 @@ work-time-tracker/
 
 ## データ保存場所
 
-Windows: `%APPDATA%/work-time-tracker/`
+Windows: `%APPDATA%/com.masam.work-time-tracker/work-time-tracker/`
 
 ### ファイル構成
 ```
-%APPDATA%/work-time-tracker/
+%APPDATA%/com.masam.work-time-tracker/work-time-tracker/
 ├── settings.json          # 作業プリセット・設定
 ├── 2025-01-31.json        # 日別記録（例）
 └── 2025-02-01.json        # 日別記録（例）
@@ -169,10 +177,12 @@ Windows: `%APPDATA%/work-time-tracker/`
 | `stop_task` | 現在の作業を停止・保存 |
 | `get_current_task` | 現在進行中の作業を取得 |
 | `get_daily_summary` | 指定日のサマリーを取得 |
+| `get_daily_records` | 指定日の詳細記録を取得（タスク別グループ化） |
 | `copy_summary_to_clipboard` | クリップボードに詳細サマリーをコピー |
 | `add_task` | 新規作業を追加 |
 | `update_task` | 作業を更新 |
 | `delete_task` | 作業を削除 |
+| `update_record_details` | 記録の詳細（メモ）を更新 |
 
 #### システムトレイ
 - 左クリック: ウィンドウ表示
@@ -236,8 +246,11 @@ const formatDuration = (seconds: number) => {
 ├─────────────────────────┤
 │ 本日の記録        [📋]  │  ← コピーボタン
 │ ┌─────────────────────┐ │
-│ │ 会議: 1時間30分15秒 │ │
-│ │ コーディング: 45分20秒 │ │
+│ │ ▼ 会議 (2件)       │ │  ← 展開可能なタスク
+│ │   09:00-09:30  30分 │ │  ← 記録詳細（開始・終了・時間）
+│ │   [詳細メモ...]    │ │  ← 詳細編集可能
+│ │ ▼ コーディング      │ │
+│ │   10:00-12:00  2時間│ │
 │ └─────────────────────┘ │
 ├─────────────────────────┤
 │ [Ctrl+Shift+S] 停止    │  ← ショートカットヘルプ

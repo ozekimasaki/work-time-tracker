@@ -12,7 +12,8 @@ import {
   Check,
   X,
   Bell,
-  ChevronDown
+  ChevronDown,
+  FileText
 } from 'lucide-react';
 import './App.css';
 import type { Task, WorkRecord, Settings as SettingsType, TaskWithRecords } from './types';
@@ -30,6 +31,8 @@ function App() {
   const [newTaskColor, setNewTaskColor] = useState('#4ECDC4');
   const [copied, setCopied] = useState(false);
   const [endWorkTime, setEndWorkTime] = useState('19:00');
+  const [editingRecord, setEditingRecord] = useState<{taskName: string, recordId: string} | null>(null);
+  const [recordDetails, setRecordDetails] = useState('');
 
   const loadSettings = useCallback(async () => {
     try {
@@ -56,9 +59,17 @@ function App() {
     }
   }, []);
 
+  const getLocalDateString = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const loadDailySummary = useCallback(async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateString();
       const summary = await invoke<[string, number][]>('get_daily_summary', { date: today });
       setDailySummary(summary);
     } catch (e) {
@@ -68,7 +79,7 @@ function App() {
 
   const loadDailyRecords = useCallback(async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateString();
       const records = await invoke<TaskWithRecords[]>('get_daily_records', { date: today });
       setDailyRecords(records);
     } catch (e) {
@@ -127,7 +138,7 @@ function App() {
 
   const copySummary = async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateString();
       await invoke<string>('copy_summary_to_clipboard', { date: today });
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -181,6 +192,32 @@ function App() {
     } catch (e) {
       console.error('Failed to save end work time:', e);
     }
+  };
+
+  const startEditingRecord = (taskName: string, record: WorkRecord) => {
+    setEditingRecord({ taskName, recordId: record.id });
+    setRecordDetails(record.details || '');
+  };
+
+  const saveRecordDetails = async (taskName: string, recordId: string) => {
+    try {
+      const today = getLocalDateString();
+      await invoke('update_record_details', { 
+        date: today, 
+        recordId, 
+        details: recordDetails.trim() || null 
+      });
+      setEditingRecord(null);
+      setRecordDetails('');
+      await loadDailyRecords();
+    } catch (e) {
+      console.error('Failed to update record details:', e);
+    }
+  };
+
+  const cancelEditingRecord = () => {
+    setEditingRecord(null);
+    setRecordDetails('');
   };
 
   const formatTime = (seconds: number) => {
@@ -262,10 +299,6 @@ function App() {
               <button
                 key={task.id}
                 className={`task-btn ${currentTask?.task_id === task.id ? 'active' : ''}`}
-                style={{ 
-                  borderLeftColor: task.color || '#4ECDC4',
-                  backgroundColor: currentTask?.task_id === task.id ? (task.color || '#4ECDC4') + '20' : undefined
-                }}
                 onClick={() => startTask(task.id)}
               >
                 <span className="task-index">{task.shortcut_index ? `Ctrl+Shift+${task.shortcut_index}` : ''}</span>
@@ -322,7 +355,7 @@ function App() {
                     </>
                   ) : (
                     <>
-                      <span style={{ borderLeft: `4px solid ${task.color || '#4ECDC4'}`, paddingLeft: 8 }}>
+                      <span className="task-name-display">
                         {task.name}
                       </span>
                       <span className="shortcut-badge">
@@ -396,12 +429,58 @@ function App() {
                   <div className="record-details">
                     {taskRecord.records.map((record) => (
                       <div key={record.id} className="record-item">
-                        <span className="record-time">
-                          {formatDateTime(record.start_time)} - {record.end_time ? formatDateTime(record.end_time) : '進行中'}
-                        </span>
-                        <span className="record-duration">
-                          {record.duration_seconds ? formatDuration(record.duration_seconds) : formatDuration(Math.floor((Date.now() - new Date(record.start_time).getTime()) / 1000))}
-                        </span>
+                        {editingRecord?.taskName === taskRecord.task_name && editingRecord?.recordId === record.id ? (
+                          <div className="record-edit-form">
+                            <div className="record-time-row">
+                              <span className="record-time">
+                                {formatDateTime(record.start_time)} - {record.end_time ? formatDateTime(record.end_time) : '進行中'}
+                              </span>
+                              <span className="record-duration">
+                                {record.duration_seconds ? formatDuration(record.duration_seconds) : formatDuration(Math.floor((Date.now() - new Date(record.start_time).getTime()) / 1000))}
+                              </span>
+                            </div>
+                            <textarea
+                              className="record-details-input"
+                              placeholder="作業内容の詳細を入力..."
+                              value={recordDetails}
+                              onChange={(e) => setRecordDetails(e.target.value)}
+                              rows={2}
+                            />
+                            <div className="record-edit-actions">
+                              <button onClick={() => saveRecordDetails(taskRecord.task_name, record.id)}>
+                                <Check size={14} /> 保存
+                              </button>
+                              <button onClick={cancelEditingRecord}>
+                                <X size={14} /> キャンセル
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="record-info-row">
+                              <span className="record-time">
+                                {formatDateTime(record.start_time)} - {record.end_time ? formatDateTime(record.end_time) : '進行中'}
+                              </span>
+                              <div className="record-actions">
+                                <span className="record-duration">
+                                  {record.duration_seconds ? formatDuration(record.duration_seconds) : formatDuration(Math.floor((Date.now() - new Date(record.start_time).getTime()) / 1000))}
+                                </span>
+                                <button 
+                                  className="edit-record-btn"
+                                  onClick={() => startEditingRecord(taskRecord.task_name, record)}
+                                  title="詳細を編集"
+                                >
+                                  <Edit2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                            {record.details && (
+                              <div className="record-details-text">
+                                <FileText size={12} /> {record.details}
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>

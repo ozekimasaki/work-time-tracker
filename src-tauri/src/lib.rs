@@ -28,6 +28,7 @@ pub struct WorkRecord {
     pub start_time: DateTime<Local>,
     pub end_time: Option<DateTime<Local>>,
     pub duration_seconds: Option<i64>,
+    pub details: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,8 +116,17 @@ fn load_daily_log(data_dir: &PathBuf, date: &str) -> DailyLog {
 
 fn save_daily_log(data_dir: &PathBuf, log: &DailyLog) -> Result<(), String> {
     let path = get_daily_log_path(data_dir, &log.date);
-    let content = serde_json::to_string_pretty(log).map_err(|e| e.to_string())?;
-    fs::write(&path, content).map_err(|e| e.to_string())
+    eprintln!("[DEBUG] Saving daily log to: {:?}", path);
+    eprintln!("[DEBUG] Data directory: {:?}", data_dir);
+    eprintln!("[DEBUG] Records count: {}", log.records.len());
+    let content = serde_json::to_string_pretty(log).map_err(|e| {
+        eprintln!("[DEBUG] JSON serialization error: {}", e);
+        e.to_string()
+    })?;
+    fs::write(&path, content).map_err(|e| {
+        eprintln!("[DEBUG] File write error: {}", e);
+        e.to_string()
+    })
 }
 
 #[tauri::command]
@@ -171,6 +181,7 @@ fn start_task(
         start_time: Local::now(),
         end_time: None,
         duration_seconds: None,
+        details: None,
     };
     
     *current = Some(new_record.clone());
@@ -360,15 +371,23 @@ fn copy_summary_to_clipboard(date: String, state: State<AppState>, app: AppHandl
                     let dur_secs = duration % 60;
                     
                     if dur_hours > 0 {
-                        text.push_str(&format!("  {} - {} ({}時間{}分{}秒)\n", 
+                        text.push_str(&format!("  {} - {} ({}時間{}分{}秒)", 
                             start_str, end_str, dur_hours, dur_mins, dur_secs));
                     } else if dur_mins > 0 {
-                        text.push_str(&format!("  {} - {} ({}分{}秒)\n", 
+                        text.push_str(&format!("  {} - {} ({}分{}秒)", 
                             start_str, end_str, dur_mins, dur_secs));
                     } else {
-                        text.push_str(&format!("  {} - {} ({}秒)\n", 
+                        text.push_str(&format!("  {} - {} ({}秒)", 
                             start_str, end_str, dur_secs));
                     }
+                    
+                    // 詳細があれば追加
+                    if let Some(details) = &record.details {
+                        if !details.is_empty() {
+                            text.push_str(&format!(" - {}", details));
+                        }
+                    }
+                    text.push('\n');
                 }
             }
         }
@@ -453,6 +472,26 @@ fn delete_task(task_id: String, state: State<AppState>) -> Result<(), String> {
     save_settings(&data_dir, &settings)?;
     
     Ok(())
+}
+
+#[tauri::command]
+fn update_record_details(
+    date: String,
+    record_id: String,
+    details: Option<String>,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let data_dir = state.data_dir.lock().map_err(|e| e.to_string())?;
+    let mut log = load_daily_log(&data_dir, &date);
+    
+    // 該当する記録を検索して更新
+    if let Some(record) = log.records.iter_mut().find(|r| r.id == record_id) {
+        record.details = details;
+        save_daily_log(&data_dir, &log)?;
+        Ok(())
+    } else {
+        Err("Record not found".to_string())
+    }
 }
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -671,7 +710,8 @@ pub fn run() {
             copy_summary_to_clipboard,
             add_task,
             update_task,
-            delete_task
+            delete_task,
+            update_record_details
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
