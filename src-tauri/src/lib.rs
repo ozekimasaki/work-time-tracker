@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local, NaiveTime};
+use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::notification::NotificationExt;
-use tauri::{AppHandle, Manager, State, Window, WindowEvent};
+use tauri::{AppHandle, Manager, State, WindowEvent};
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
+use tauri_plugin_notification::NotificationExt;
 
 // データ構造
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ pub struct WorkRecord {
     pub task_name: String,
     pub start_time: DateTime<Local>,
     pub end_time: Option<DateTime<Local>>,
-    pub duration_minutes: Option<i64>,
+    pub duration_seconds: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,8 +148,8 @@ fn start_task(
     let mut current = state.current_record.lock().map_err(|e| e.to_string())?;
     if let Some(mut record) = current.take() {
         record.end_time = Some(Local::now());
-        let duration = (record.end_time.unwrap() - record.start_time).num_minutes();
-        record.duration_minutes = Some(duration);
+        let duration = (record.end_time.unwrap() - record.start_time).num_seconds();
+        record.duration_seconds = Some(duration);
         
         let today = Local::now().format("%Y-%m-%d").to_string();
         let mut log = load_daily_log(&data_dir, &today);
@@ -170,7 +170,7 @@ fn start_task(
         task_name,
         start_time: Local::now(),
         end_time: None,
-        duration_minutes: None,
+        duration_seconds: None,
     };
     
     *current = Some(new_record.clone());
@@ -188,8 +188,8 @@ fn stop_task(state: State<AppState>) -> Result<Option<WorkRecord>, String> {
     
     if let Some(mut record) = current.take() {
         record.end_time = Some(Local::now());
-        let duration = (record.end_time.unwrap() - record.start_time).num_minutes();
-        record.duration_minutes = Some(duration);
+        let duration = (record.end_time.unwrap() - record.start_time).num_seconds();
+        record.duration_seconds = Some(duration);
         
         let today = Local::now().format("%Y-%m-%d").to_string();
         let mut log = load_daily_log(&data_dir, &today);
@@ -221,14 +221,14 @@ fn get_daily_summary(date: String, state: State<AppState>) -> Result<Vec<(String
     }
     
     for record in &log.records {
-        if let Some(duration) = record.duration_minutes {
+        if let Some(duration) = record.duration_seconds {
             *summary.entry(record.task_name.clone()).or_insert(0) += duration;
         }
     }
     
     if let Ok(current) = state.current_record.lock() {
         if let Some(record) = current.as_ref() {
-            let duration = (Local::now() - record.start_time).num_minutes();
+            let duration = (Local::now() - record.start_time).num_seconds();
             *summary.entry(record.task_name.clone()).or_insert(0) += duration;
         }
     }
@@ -244,25 +244,161 @@ fn get_daily_summary(date: String, state: State<AppState>) -> Result<Vec<(String
     Ok(result)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskWithRecords {
+    pub task_name: String,
+    pub total_seconds: i64,
+    pub records: Vec<WorkRecord>,
+}
+
 #[tauri::command]
-fn copy_summary_to_clipboard(date: String, state: State<AppState>, app: AppHandle) -> Result<String, String> {
-    let summary = get_daily_summary(date, state)?;
+fn get_daily_records(date: String, state: State<AppState>) -> Result<Vec<TaskWithRecords>, String> {
+    let data_dir = state.data_dir.lock().map_err(|e| e.to_string())?;
+    let log = load_daily_log(&data_dir, &date);
+    let settings = state.settings.lock().map_err(|e| e.to_string())?;
     
-    let mut text = String::new();
-    for (task_name, minutes) in summary {
-        if minutes > 0 {
-            let hours = minutes / 60;
-            let mins = minutes % 60;
-            if hours > 0 {
-                text.push_str(&format!("{}: {}時間{}分\n", task_name, hours, mins));
-            } else {
-                text.push_str(&format!("{}: {}分\n", task_name, mins));
+    // タスクごとに記録をグループ化
+    let mut task_records: HashMap<String, Vec<WorkRecord>> = HashMap::new();
+    for record in &log.records {
+        task_records.entry(record.task_name.clone()).or_default().push(record.clone());
+    }
+    
+    // 設定に登録された順序で結果を作成
+    let mut result: Vec<TaskWithRecords> = Vec::new();
+    for task in &settings.tasks {
+        if let Some(records) = task_records.get(&task.name) {
+            let total_seconds: i64 = records.iter()
+                .filter_map(|r| r.duration_seconds)
+                .sum();
+            
+            if total_seconds > 0 || !records.is_empty() {
+                result.push(TaskWithRecords {
+                    task_name: task.name.clone(),
+                    total_seconds,
+                    records: records.clone(),
+                });
             }
         }
     }
     
-    if text.is_empty() {
-        text = "本日の記録はありません".to_string();
+    // 進行中のタスクを追加
+    if let Ok(current) = state.current_record.lock() {
+        if let Some(record) = current.as_ref() {
+            let duration = (Local::now() - record.start_time).num_seconds();
+            
+            // 既存のタスクに追加するか、新規作成
+            if let Some(task_with_records) = result.iter_mut().find(|t| t.task_name == record.task_name) {
+                task_with_records.total_seconds += duration;
+                task_with_records.records.push(record.clone());
+            } else {
+                result.push(TaskWithRecords {
+                    task_name: record.task_name.clone(),
+                    total_seconds: duration,
+                    records: vec![record.clone()],
+                });
+            }
+        }
+    }
+    
+    Ok(result)
+}
+
+#[tauri::command]
+fn copy_summary_to_clipboard(date: String, state: State<AppState>, app: AppHandle) -> Result<String, String> {
+    let data_dir = state.data_dir.lock().map_err(|e| e.to_string())?;
+    let log = load_daily_log(&data_dir, &date);
+    let settings = state.settings.lock().map_err(|e| e.to_string())?;
+    
+    // 作業ごとに記録をグループ化
+    let mut task_records: HashMap<String, Vec<&WorkRecord>> = HashMap::new();
+    for record in &log.records {
+        task_records.entry(record.task_name.clone()).or_default().push(record);
+    }
+    
+    let mut text = String::new();
+    text.push_str(&format!("作業時間記録 ({})\n", date));
+    text.push_str("=".repeat(40).as_str());
+    text.push('\n');
+    
+    // 設定に登録された順序で作業を処理
+    for task in &settings.tasks {
+        if let Some(records) = task_records.get(&task.name) {
+            if records.is_empty() {
+                continue;
+            }
+            
+            // 合計時間を計算
+            let total_seconds: i64 = records.iter()
+                .filter_map(|r| r.duration_seconds)
+                .sum();
+            
+            if total_seconds == 0 {
+                continue;
+            }
+            
+            // 作業名と合計時間
+            let hours = total_seconds / 3600;
+            let mins = (total_seconds % 3600) / 60;
+            let secs = total_seconds % 60;
+            
+            if hours > 0 {
+                text.push_str(&format!("\n【{}】合計: {}時間{}分{}秒\n", task.name, hours, mins, secs));
+            } else if mins > 0 {
+                text.push_str(&format!("\n【{}】合計: {}分{}秒\n", task.name, mins, secs));
+            } else {
+                text.push_str(&format!("\n【{}】合計: {}秒\n", task.name, secs));
+            }
+            
+            // 各記録の詳細
+            for record in records {
+                if let (Some(end), Some(duration)) = (record.end_time, record.duration_seconds) {
+                    let start = record.start_time;
+                    let start_str = start.format("%H:%M:%S");
+                    let end_str = end.format("%H:%M:%S");
+                    let dur_hours = duration / 3600;
+                    let dur_mins = (duration % 3600) / 60;
+                    let dur_secs = duration % 60;
+                    
+                    if dur_hours > 0 {
+                        text.push_str(&format!("  {} - {} ({}時間{}分{}秒)\n", 
+                            start_str, end_str, dur_hours, dur_mins, dur_secs));
+                    } else if dur_mins > 0 {
+                        text.push_str(&format!("  {} - {} ({}分{}秒)\n", 
+                            start_str, end_str, dur_mins, dur_secs));
+                    } else {
+                        text.push_str(&format!("  {} - {} ({}秒)\n", 
+                            start_str, end_str, dur_secs));
+                    }
+                }
+            }
+        }
+    }
+    
+    // 進行中の作業があれば追加
+    if let Ok(current) = state.current_record.lock() {
+        if let Some(record) = current.as_ref() {
+            let duration = (Local::now() - record.start_time).num_seconds();
+            let start_str = record.start_time.format("%H:%M:%S");
+            let hours = duration / 3600;
+            let mins = (duration % 3600) / 60;
+            let secs = duration % 60;
+            
+            text.push_str(&format!("\n【{}】進行中...\n", record.task_name));
+            if hours > 0 {
+                text.push_str(&format!("  {} - 現在 ({}時間{}分{}秒経過)\n", 
+                    start_str, hours, mins, secs));
+            } else if mins > 0 {
+                text.push_str(&format!("  {} - 現在 ({}分{}秒経過)\n", 
+                    start_str, mins, secs));
+            } else {
+                text.push_str(&format!("  {} - 現在 ({}秒経過)\n", 
+                    start_str, secs));
+            }
+        }
+    }
+    
+    if text.lines().count() <= 2 {
+        text = format!("作業時間記録 ({})\n本日の記録はありません", date);
     }
     
     app.clipboard().write_text(text.clone()).map_err(|e| e.to_string())?;
@@ -344,21 +480,33 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "stop" => {
-                let state = app.state::<AppState>();
-                let _ = stop_task(state);
+                let app_handle = app.clone();
+                std::thread::spawn(move || {
+                    let state = app_handle.state::<AppState>();
+                    let _ = stop_task(state);
+                });
             }
             "restart" => {
-                let state = app.state::<AppState>();
-                if let Ok(last_id) = state.last_task_id.lock() {
-                    if let Some(id) = last_id.clone() {
+                let app_handle = app.clone();
+                std::thread::spawn(move || {
+                    let state = app_handle.state::<AppState>();
+                    let task_id = {
+                        let last_id = state.last_task_id.lock();
+                        last_id.ok().and_then(|guard| guard.clone())
+                    };
+                    if let Some(id) = task_id {
+                        let state = app_handle.state::<AppState>();
                         let _ = start_task(id, state);
                     }
-                }
+                });
             }
             "quit" => {
-                let state = app.state::<AppState>();
-                let _ = stop_task(state);
-                app.exit(0);
+                let app_handle = app.clone();
+                std::thread::spawn(move || {
+                    let state = app_handle.state::<AppState>();
+                    let _ = stop_task(state);
+                    app_handle.exit(0);
+                });
             }
             _ => {}
         })
@@ -378,40 +526,48 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    app.global_shortcut().register("Ctrl+Shift+S")?;
-    app.global_shortcut().register("Ctrl+Shift+R")?;
+    use tauri_plugin_global_shortcut::Shortcut;
     
-    for i in 1..=9 {
-        app.global_shortcut().register(&format!("Ctrl+Shift+{}", i))?;
-    }
-    
+    // Ctrl+Shift+S - 停止
+    let shortcut_s: Shortcut = "Ctrl+Shift+S".parse()?;
     let app_handle = app.clone();
-    app.global_shortcut().on_shortcut("Ctrl+Shift+S", move |_, _| {
+    app.global_shortcut().on_shortcut(shortcut_s, move |_app, _shortcut, _event| {
         let state = app_handle.state::<AppState>();
         let _ = stop_task(state);
-    });
+    })?;
     
+    // Ctrl+Shift+R - 再開
+    let shortcut_r: Shortcut = "Ctrl+Shift+R".parse()?;
     let app_handle = app.clone();
-    app.global_shortcut().on_shortcut("Ctrl+Shift+R", move |_, _| {
+    app.global_shortcut().on_shortcut(shortcut_r, move |_app, _shortcut, _event| {
         let state = app_handle.state::<AppState>();
-        if let Ok(last_id) = state.last_task_id.lock() {
-            if let Some(id) = last_id.clone() {
+        let task_id = {
+            let last_id = state.last_task_id.lock();
+            last_id.ok().and_then(|guard| guard.clone())
+        };
+        if let Some(id) = task_id {
+            let state = app_handle.state::<AppState>();
+            let _ = start_task(id, state);
+        }
+    })?;
+    
+    // Ctrl+Shift+1~9 - 作業切替
+    for i in 1..=9 {
+        let shortcut: Shortcut = format!("Ctrl+Shift+{}", i).parse()?;
+        let app_handle = app.clone();
+        app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, _event| {
+            let state = app_handle.state::<AppState>();
+            let task_id = {
+                let settings = state.settings.lock();
+                settings.ok().and_then(|s| {
+                    s.tasks.iter().find(|t| t.shortcut_index == Some(i)).map(|t| t.id.clone())
+                })
+            };
+            if let Some(id) = task_id {
+                let state = app_handle.state::<AppState>();
                 let _ = start_task(id, state);
             }
-        }
-    });
-    
-    for i in 1..=9 {
-        let app_handle = app.clone();
-        let shortcut = format!("Ctrl+Shift+{}", i);
-        app.global_shortcut().on_shortcut(&shortcut, move |_, _| {
-            let state = app_handle.state::<AppState>();
-            if let Ok(settings) = state.settings.lock() {
-                if let Some(task) = settings.tasks.iter().find(|t| t.shortcut_index == Some(i)) {
-                    let _ = start_task(task.id.clone(), state);
-                }
-            }
-        });
+        })?;
     }
     
     Ok(())
@@ -425,26 +581,33 @@ fn setup_reminder(app: &AppHandle) {
             std::thread::sleep(std::time::Duration::from_secs(60));
             
             let state = app_handle.state::<AppState>();
-            if let Ok(settings) = state.settings.lock() {
-                if !settings.reminder_enabled {
+            let (reminder_enabled, end_work_time) = {
+                let settings = state.settings.lock();
+                if let Ok(s) = settings {
+                    (s.reminder_enabled, s.end_work_time.clone())
+                } else {
                     continue;
                 }
+            };
+            
+            if !reminder_enabled {
+                continue;
+            }
+            
+            let now = Local::now();
+            let current_time = now.format("%H:%M").to_string();
+            
+            if current_time == end_work_time {
+                let _ = app_handle
+                    .notification()
+                    .builder()
+                    .title("終業時間です")
+                    .body("本日の作業時間を確認してください")
+                    .show();
                 
-                let now = Local::now();
-                let current_time = now.format("%H:%M").to_string();
-                
-                if current_time == settings.end_work_time {
-                    let _ = app_handle
-                        .notification()
-                        .builder()
-                        .title("終業時間です")
-                        .body("本日の作業時間を確認してください")
-                        .show();
-                    
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
             }
         }
@@ -457,6 +620,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState {
             settings: Mutex::new(Settings::default()),
             current_record: Mutex::new(None),
@@ -503,6 +667,7 @@ pub fn run() {
             stop_task,
             get_current_task,
             get_daily_summary,
+            get_daily_records,
             copy_summary_to_clipboard,
             add_task,
             update_task,

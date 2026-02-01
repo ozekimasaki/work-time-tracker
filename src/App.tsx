@@ -11,15 +11,18 @@ import {
   Copy,
   Check,
   X,
-  Bell
+  Bell,
+  ChevronDown
 } from 'lucide-react';
 import './App.css';
-import type { Task, WorkRecord, Settings as SettingsType } from './types';
+import type { Task, WorkRecord, Settings as SettingsType, TaskWithRecords } from './types';
 
 function App() {
   const [settings, setSettings] = useState<SettingsType | null>(null);
   const [currentTask, setCurrentTask] = useState<WorkRecord | null>(null);
   const [dailySummary, setDailySummary] = useState<[string, number][]>([]);
+  const [dailyRecords, setDailyRecords] = useState<TaskWithRecords[]>([]);
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [elapsedTime, setElapsedTime] = useState<number>(0);
   const [showSettings, setShowSettings] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -63,18 +66,30 @@ function App() {
     }
   }, []);
 
+  const loadDailyRecords = useCallback(async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const records = await invoke<TaskWithRecords[]>('get_daily_records', { date: today });
+      setDailyRecords(records);
+    } catch (e) {
+      console.error('Failed to load daily records:', e);
+    }
+  }, []);
+
   useEffect(() => {
     loadSettings();
     loadCurrentTask();
     loadDailySummary();
+    loadDailyRecords();
 
     const interval = setInterval(() => {
       loadCurrentTask();
       loadDailySummary();
+      loadDailyRecords();
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [loadSettings, loadCurrentTask, loadDailySummary]);
+  }, [loadSettings, loadCurrentTask, loadDailySummary, loadDailyRecords]);
 
   useEffect(() => {
     if (!currentTask) return;
@@ -92,6 +107,7 @@ function App() {
       await invoke('start_task', { taskId });
       await loadCurrentTask();
       await loadDailySummary();
+      await loadDailyRecords();
     } catch (e) {
       console.error('Failed to start task:', e);
     }
@@ -103,6 +119,7 @@ function App() {
       setCurrentTask(null);
       setElapsedTime(0);
       await loadDailySummary();
+      await loadDailyRecords();
     } catch (e) {
       console.error('Failed to stop task:', e);
     }
@@ -173,13 +190,33 @@ function App() {
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const formatDuration = (minutes: number) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
+  const formatDuration = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
     if (hours > 0) {
-      return `${hours}時間${mins}分`;
+      return `${hours}時間${mins}分${secs}秒`;
+    } else if (mins > 0) {
+      return `${mins}分${secs}秒`;
     }
-    return `${mins}分`;
+    return `${secs}秒`;
+  };
+
+  const formatDateTime = (dateTimeStr: string) => {
+    const date = new Date(dateTimeStr);
+    return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  const toggleTaskExpansion = (taskName: string) => {
+    setExpandedTasks(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(taskName)) {
+        newSet.delete(taskName);
+      } else {
+        newSet.add(taskName);
+      }
+      return newSet;
+    });
   };
 
   const colors = [
@@ -336,17 +373,41 @@ function App() {
           </button>
         </div>
         <div className="summary-list">
-          {dailySummary.filter(([, mins]) => mins > 0).length === 0 ? (
+          {dailyRecords.length === 0 ? (
             <div className="no-records">本日の記録はありません</div>
           ) : (
-            dailySummary
-              .filter(([, mins]) => mins > 0)
-              .map(([name, minutes]) => (
-                <div key={name} className="summary-item">
-                  <span className="name">{name}</span>
-                  <span className="time">{formatDuration(minutes)}</span>
+            dailyRecords.map((taskRecord) => (
+              <div key={taskRecord.task_name} className="task-record">
+                <div 
+                  className="summary-item clickable"
+                  onClick={() => toggleTaskExpansion(taskRecord.task_name)}
+                >
+                  <div className="task-info">
+                    <ChevronDown 
+                      size={16} 
+                      className={`chevron ${expandedTasks.has(taskRecord.task_name) ? 'expanded' : ''}`}
+                    />
+                    <span className="name">{taskRecord.task_name}</span>
+                    <span className="record-count">({taskRecord.records.length}件)</span>
+                  </div>
+                  <span className="time">{formatDuration(taskRecord.total_seconds)}</span>
                 </div>
-              ))
+                {expandedTasks.has(taskRecord.task_name) && (
+                  <div className="record-details">
+                    {taskRecord.records.map((record) => (
+                      <div key={record.id} className="record-item">
+                        <span className="record-time">
+                          {formatDateTime(record.start_time)} - {record.end_time ? formatDateTime(record.end_time) : '進行中'}
+                        </span>
+                        <span className="record-duration">
+                          {record.duration_seconds ? formatDuration(record.duration_seconds) : formatDuration(Math.floor((Date.now() - new Date(record.start_time).getTime()) / 1000))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))
           )}
         </div>
       </section>

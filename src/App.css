@@ -443,3 +443,80 @@ kbd {
   font-family: monospace;
   font-size: 11px;
 }
+
+/* アコーディオン形式のタスク記録 */
+.task-record {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.summary-item.clickable {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.summary-item.clickable:hover {
+  background: #f8f9fa;
+  transform: translateX(2px);
+}
+
+.task-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.chevron {
+  color: #999;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.record-count {
+  font-size: 12px;
+  color: #999;
+  margin-left: 4px;
+}
+
+/* 個別セッション詳細 */
+.record-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px 12px 12px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-top: none;
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+  margin-top: -6px;
+}
+
+.record-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  border-left: 3px solid #667eea;
+}
+
+.record-time {
+  font-size: 13px;
+  color: #666;
+  font-variant-numeric: tabular-nums;
+}
+
+.record-duration {
+  font-size: 13px;
+  font-weight: 600;
+  color: #667eea;
+  font-variant-numeric: tabular-nums;
+}
