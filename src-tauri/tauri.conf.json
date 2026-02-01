@@ -19,10 +19,6 @@
         "minHeight": 500
       }
     ],
-    "trayIcon": {
-      "iconPath": "icons/icon.ico",
-      "tooltip": "作業時間記録"
-    },
     "security": {
       "csp": null
     }
