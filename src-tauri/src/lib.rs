@@ -256,6 +256,19 @@ fn get_daily_summary(date: String, state: State<AppState>) -> Result<Vec<(String
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeriodSummary {
+    pub task_name: String,
+    pub total_seconds: i64,
+    pub daily_breakdown: Vec<DailyTotal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyTotal {
+    pub date: String,
+    pub total_seconds: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskWithRecords {
     pub task_name: String,
     pub total_seconds: i64,
@@ -472,6 +485,141 @@ fn delete_task(task_id: String, state: State<AppState>) -> Result<(), String> {
     save_settings(&data_dir, &settings)?;
     
     Ok(())
+}
+
+#[tauri::command]
+fn get_summary_by_range(
+    start_date: String,
+    end_date: String,
+    state: State<AppState>,
+) -> Result<Vec<PeriodSummary>, String> {
+    let data_dir = state.data_dir.lock().map_err(|e| e.to_string())?;
+    let settings = state.settings.lock().map_err(|e| e.to_string())?;
+    
+    // 日付範囲を生成
+    let start = chrono::NaiveDate::parse_from_str(&start_date, "%Y-%m-%d")
+        .map_err(|e| format!("Invalid start date: {}", e))?;
+    let end = chrono::NaiveDate::parse_from_str(&end_date, "%Y-%m-%d")
+        .map_err(|e| format!("Invalid end date: {}", e))?;
+    
+    let mut task_daily_totals: HashMap<String, HashMap<String, i64>> = HashMap::new();
+    
+    // 各日のログを読み込んで集計
+    let mut current = start;
+    while current <= end {
+        let date_str = current.format("%Y-%m-%d").to_string();
+        let log = load_daily_log(&data_dir, &date_str);
+        
+        for record in &log.records {
+            if let Some(duration) = record.duration_seconds {
+                let daily_map = task_daily_totals
+                    .entry(record.task_name.clone())
+                    .or_default();
+                *daily_map.entry(date_str.clone()).or_insert(0) += duration;
+            }
+        }
+        
+        current = current.succ_opt().unwrap_or(current);
+    }
+    
+    // 進行中のタスクを追加
+    if let Ok(current_record) = state.current_record.lock() {
+        if let Some(record) = current_record.as_ref() {
+            let today = Local::now().format("%Y-%m-%d").to_string();
+            let today_date = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d").unwrap();
+            
+            if today_date >= start && today_date <= end {
+                let duration = (Local::now() - record.start_time).num_seconds();
+                let daily_map = task_daily_totals
+                    .entry(record.task_name.clone())
+                    .or_default();
+                *daily_map.entry(today).or_insert(0) += duration;
+            }
+        }
+    }
+    
+    // 結果を構築
+    let mut result: Vec<PeriodSummary> = Vec::new();
+    for task in &settings.tasks {
+        if let Some(daily_map) = task_daily_totals.get(&task.name) {
+            let total_seconds: i64 = daily_map.values().sum();
+            if total_seconds > 0 {
+                let mut daily_breakdown: Vec<DailyTotal> = daily_map
+                    .iter()
+                    .map(|(date, &seconds)| DailyTotal {
+                        date: date.clone(),
+                        total_seconds: seconds,
+                    })
+                    .collect();
+                daily_breakdown.sort_by(|a, b| a.date.cmp(&b.date));
+                
+                result.push(PeriodSummary {
+                    task_name: task.name.clone(),
+                    total_seconds,
+                    daily_breakdown,
+                });
+            }
+        }
+    }
+    
+    Ok(result)
+}
+
+#[tauri::command]
+fn copy_period_summary_to_clipboard(
+    start_date: String,
+    end_date: String,
+    state: State<AppState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let summary = get_summary_by_range(start_date.clone(), end_date.clone(), state)?;
+    
+    let mut text = String::new();
+    text.push_str(&format!("作業時間記録 ({} ~ {})\n", start_date, end_date));
+    text.push_str("=".repeat(40).as_str());
+    text.push('\n');
+    
+    let total_all: i64 = summary.iter().map(|s| s.total_seconds).sum();
+    let total_hours = total_all / 3600;
+    let total_mins = (total_all % 3600) / 60;
+    
+    if total_hours > 0 {
+        text.push_str(&format!("\n合計: {}時間{}分\n", total_hours, total_mins));
+    } else {
+        text.push_str(&format!("\n合計: {}分\n", total_mins));
+    }
+    
+    for task_summary in &summary {
+        let hours = task_summary.total_seconds / 3600;
+        let mins = (task_summary.total_seconds % 3600) / 60;
+        
+        if hours > 0 {
+            text.push_str(&format!("\n【{}】{}時間{}分\n", task_summary.task_name, hours, mins));
+        } else {
+            text.push_str(&format!("\n【{}】{}分\n", task_summary.task_name, mins));
+        }
+        
+        for daily in &task_summary.daily_breakdown {
+            let d_hours = daily.total_seconds / 3600;
+            let d_mins = (daily.total_seconds % 3600) / 60;
+            let d_secs = daily.total_seconds % 60;
+            
+            if d_hours > 0 {
+                text.push_str(&format!("  {}: {}時間{}分{}秒\n", daily.date, d_hours, d_mins, d_secs));
+            } else if d_mins > 0 {
+                text.push_str(&format!("  {}: {}分{}秒\n", daily.date, d_mins, d_secs));
+            } else {
+                text.push_str(&format!("  {}: {}秒\n", daily.date, d_secs));
+            }
+        }
+    }
+    
+    if summary.is_empty() {
+        text.push_str("\nこの期間の記録はありません");
+    }
+    
+    app.clipboard().write_text(text.clone()).map_err(|e| e.to_string())?;
+    Ok(text)
 }
 
 #[tauri::command]
@@ -711,7 +859,9 @@ pub fn run() {
             add_task,
             update_task,
             delete_task,
-            update_record_details
+            update_record_details,
+            get_summary_by_range,
+            copy_period_summary_to_clipboard
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

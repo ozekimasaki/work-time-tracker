@@ -26,3 +26,16 @@ export interface TaskWithRecords {
   total_seconds: number;
   records: WorkRecord[];
 }
+
+export interface DailyTotal {
+  date: string;
+  total_seconds: number;
+}
+
+export interface PeriodSummary {
+  task_name: string;
+  total_seconds: number;
+  daily_breakdown: DailyTotal[];
+}
+
+export type SummaryViewMode = 'daily' | 'weekly' | 'monthly';
