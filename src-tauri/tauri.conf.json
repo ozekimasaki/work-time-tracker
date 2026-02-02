@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "作業時間記録",
+  "productName": "work-time-tracker",
   "version": "0.1.0",
   "identifier": "com.masam.work-time-tracker",
   "build": {

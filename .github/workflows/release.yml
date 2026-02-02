@@ -30,7 +30,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: work-time-tracker-windows
-          path: src-tauri/target/release/bundle/**/*
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
         if: always()
 
   build-macos:
@@ -56,9 +58,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: work-time-tracker-macos
-          path: |
-            src-tauri/target/release/bundle/**/*.app
-            src-tauri/target/release/bundle/**/*.dmg
+          path: src-tauri/target/release/bundle/dmg/*.dmg
         if: always()
 
   release:
