@@ -137,9 +137,9 @@ fn save_settings_command(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn start_task(
-    taskId: String,
+    task_id: String,
     state: State<AppState>,
 ) -> Result<WorkRecord, String> {
     let data_dir = state.data_dir.lock().map_err(|e| e.to_string())?;
@@ -160,13 +160,13 @@ fn start_task(
     let task_name = settings
         .tasks
         .iter()
-        .find(|t| t.id == taskId)
+        .find(|t| t.id == task_id)
         .map(|t| t.name.clone())
         .unwrap_or_else(|| "不明".to_string());
     
     let new_record = WorkRecord {
         id: format!("{}", chrono::Local::now().timestamp_millis()),
-        task_id: taskId.clone(),
+        task_id: task_id.clone(),
         task_name,
         start_time: Local::now(),
         end_time: None,
@@ -177,7 +177,7 @@ fn start_task(
     *current = Some(new_record.clone());
     
     let mut last = state.last_task_id.lock().map_err(|e| e.to_string())?;
-    *last = Some(taskId);
+    *last = Some(task_id);
     
     Ok(new_record)
 }
@@ -651,10 +651,10 @@ fn copy_period_summary_to_clipboard(
     Ok(text)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn update_record_details(
     date: String,
-    recordId: String,
+    record_id: String,
     details: Option<String>,
     state: State<AppState>,
 ) -> Result<(), String> {
@@ -662,7 +662,7 @@ fn update_record_details(
     let mut log = load_daily_log(&data_dir, &date);
     
     // 該当する記録を検索して更新
-    if let Some(record) = log.records.iter_mut().find(|r| r.id == recordId) {
+    if let Some(record) = log.records.iter_mut().find(|r| r.id == record_id) {
         record.details = details;
         save_daily_log(&data_dir, &log)?;
         Ok(())
@@ -671,17 +671,17 @@ fn update_record_details(
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn delete_record(
     date: String,
-    recordId: String,
+    record_id: String,
     state: State<AppState>,
 ) -> Result<(), String> {
     let data_dir = state.data_dir.lock().map_err(|e| e.to_string())?;
     let mut log = load_daily_log(&data_dir, &date);
     
     let before_len = log.records.len();
-    log.records.retain(|r| r.id != recordId);
+    log.records.retain(|r| r.id != record_id);
     
     if log.records.len() == before_len {
         return Err("Record not found".to_string());
