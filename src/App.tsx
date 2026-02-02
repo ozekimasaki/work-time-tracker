@@ -1,676 +1,189 @@
 import { useState, useEffect, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { 
-  Play, 
-  Square, 
-  Settings, 
-  Plus, 
-  Trash2, 
-  Edit2, 
-  Clock, 
-  Copy,
-  Check,
-  X,
-  Bell,
-  ChevronDown,
-  FileText,
-  ChevronLeft,
-  ChevronRight,
-  AlertTriangle
-} from 'lucide-react';
+import { useSettings } from './hooks/useSettings';
+import { useWorkRecords } from './hooks/useWorkRecords';
+import { useTimer } from './hooks/useTimer';
+import { Header } from './components/Header';
+import { TimerDisplay } from './components/TimerDisplay';
+import { TaskList } from './components/TaskList';
+import { SettingsPanel } from './components/SettingsPanel';
+import { SummaryView } from './components/SummaryView';
+import { Footer } from './components/Footer';
+import { getWeekRange, getMonthRange, getToday } from './utils/dateRange';
+import type { SummaryViewMode } from './types';
 import './App.css';
-import type { Task, WorkRecord, Settings as SettingsType, TaskWithRecords, PeriodSummary, SummaryViewMode } from './types';
 
 function App() {
-  const [settings, setSettings] = useState<SettingsType | null>(null);
-  const [currentTask, setCurrentTask] = useState<WorkRecord | null>(null);
-  const [dailyRecords, setDailyRecords] = useState<TaskWithRecords[]>([]);
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  });
-  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
-  const [elapsedTime, setElapsedTime] = useState<number>(0);
+  const {
+    settings,
+    isLoading,
+    saveSettings,
+    addTask,
+    updateTask,
+    deleteTask,
+    deleteAllData
+  } = useSettings();
+
+  const {
+    currentTask,
+    dailyRecords,
+    periodSummary,
+    loadDailyRecords,
+    loadPeriodSummary,
+    startTask,
+    stopTask,
+    copySummary,
+    copyPeriodSummary,
+    updateRecordDetails,
+    deleteRecord
+  } = useWorkRecords();
+
+  const { elapsedTime, resetTimer } = useTimer(currentTask);
+
+  const [selectedDate, setSelectedDate] = useState(getToday);
   const [showSettings, setShowSettings] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [newTaskName, setNewTaskName] = useState('');
-  const [newTaskColor, setNewTaskColor] = useState('#4ECDC4');
-  const [copied, setCopied] = useState(false);
   const [endWorkTime, setEndWorkTime] = useState('19:00');
-  const [editingRecord, setEditingRecord] = useState<{taskName: string, recordId: string} | null>(null);
-  const [recordDetails, setRecordDetails] = useState('');
-  // 週次/月次サマリー用の状態
   const [summaryViewMode, setSummaryViewMode] = useState<SummaryViewMode>('daily');
-  const [periodSummary, setPeriodSummary] = useState<PeriodSummary[]>([]);
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
   const [currentMonthOffset, setCurrentMonthOffset] = useState(0);
+  const [copied, setCopied] = useState(false);
   const [periodCopied, setPeriodCopied] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const loadSettings = useCallback(async () => {
-    try {
-      const s = await invoke<SettingsType>('get_settings');
-      setSettings(s);
-      setEndWorkTime(s.end_work_time);
-    } catch (e) {
-      console.error('Failed to load settings:', e);
+  useEffect(() => {
+    if (settings) {
+      setEndWorkTime(settings.end_work_time);
     }
-  }, []);
-
-  const loadCurrentTask = useCallback(async () => {
-    try {
-      const task = await invoke<WorkRecord | null>('get_current_task');
-      setCurrentTask(task);
-      if (task) {
-        const start = new Date(task.start_time).getTime();
-        setElapsedTime(Math.floor((Date.now() - start) / 1000));
-      } else {
-        setElapsedTime(0);
-      }
-    } catch (e) {
-      console.error('Failed to load current task:', e);
-    }
-  }, []);
-
-  const loadDailyRecords = useCallback(async () => {
-    try {
-      const records = await invoke<TaskWithRecords[]>('get_daily_records', { date: selectedDate });
-      setDailyRecords(records);
-    } catch (e) {
-      console.error('Failed to load daily records:', e);
-    }
-  }, [selectedDate]);
+  }, [settings]);
 
   useEffect(() => {
-    loadSettings();
-    loadCurrentTask();
-    loadDailyRecords();
-  }, [loadSettings, loadCurrentTask, loadDailyRecords]);
-
-  useEffect(() => {
-    if (!currentTask) return;
-
-    const interval = setInterval(() => {
-      const start = new Date(currentTask.start_time).getTime();
-      setElapsedTime(Math.floor((Date.now() - start) / 1000));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [currentTask]);
-
-  const startTask = async (taskId: string) => {
-    try {
-      await invoke('start_task', { taskId });
-      await loadCurrentTask();
-      await loadDailyRecords();
-    } catch (e) {
-      console.error('Failed to start task:', e);
-    }
-  };
-
-  const stopTask = async () => {
-    try {
-      await invoke('stop_task');
-      setCurrentTask(null);
-      setElapsedTime(0);
-      await loadDailyRecords();
-    } catch (e) {
-      console.error('Failed to stop task:', e);
-    }
-  };
-
-  const copySummary = async () => {
-    try {
-      await invoke<string>('copy_summary_to_clipboard', { date: selectedDate });
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      console.error('Failed to copy summary:', e);
-    }
-  };
-
-  const addTask = async () => {
-    if (!newTaskName.trim()) return;
-    try {
-      await invoke('add_task', { 
-        name: newTaskName.trim(), 
-        color: newTaskColor 
-      });
-      setNewTaskName('');
-      await loadSettings();
-    } catch (e) {
-      console.error('Failed to add task:', e);
-    }
-  };
-
-  const updateTask = async () => {
-    if (!editingTask) return;
-    try {
-      await invoke('update_task', { task: editingTask });
-      setEditingTask(null);
-      await loadSettings();
-    } catch (e) {
-      console.error('Failed to update task:', e);
-    }
-  };
-
-  const deleteTask = async (taskId: string) => {
-    if (!confirm('この作業を削除しますか？')) return;
-    try {
-      await invoke('delete_task', { taskId });
-      await loadSettings();
-    } catch (e) {
-      console.error('Failed to delete task:', e);
-    }
-  };
-
-  const saveEndWorkTime = async () => {
-    try {
-      if (settings) {
-        const newSettings = { ...settings, end_work_time: endWorkTime };
-        await invoke('save_settings_command', { settings: newSettings });
-        setSettings(newSettings);
-      }
-    } catch (e) {
-      console.error('Failed to save end work time:', e);
-    }
-  };
-
-  const deleteAllData = async () => {
-    try {
-      await invoke('delete_all_data');
-      setShowDeleteConfirm(false);
-      setCurrentTask(null);
-      setElapsedTime(0);
-      await loadDailyRecords();
-    } catch (e) {
-      console.error('Failed to delete all data:', e);
-    }
-  };
-
-  const startEditingRecord = (taskName: string, record: WorkRecord) => {
-    setEditingRecord({ taskName, recordId: record.id });
-    setRecordDetails(record.details || '');
-  };
-
-  const saveRecordDetails = async (_taskName: string, recordId: string) => {
-    try {
-      await invoke('update_record_details', { 
-        date: selectedDate, 
-        recordId, 
-        details: recordDetails.trim() || null 
-      });
-      setEditingRecord(null);
-      setRecordDetails('');
-      await loadDailyRecords();
-    } catch (e) {
-      console.error('Failed to update record details:', e);
-    }
-  };
-
-  const cancelEditingRecord = () => {
-    setEditingRecord(null);
-    setRecordDetails('');
-  };
-
-  const deleteRecord = async (date: string, recordId: string) => {
-    if (!confirm('この記録を削除しますか？')) return;
-    try {
-      await invoke('delete_record', { date, recordId });
-      // 編集中なら解除
-      if (editingRecord?.recordId === recordId) {
-        setEditingRecord(null);
-        setRecordDetails('');
-      }
-      await loadDailyRecords();
-    } catch (e) {
-      console.error('Failed to delete record:', e);
-    }
-  };
-
-  const formatTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatDuration = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    if (hours > 0) {
-      return `${hours}時間${mins}分${secs}秒`;
-    } else if (mins > 0) {
-      return `${mins}分${secs}秒`;
-    }
-    return `${secs}秒`;
-  };
-
-  const formatDateTime = (dateTimeStr: string) => {
-    const date = new Date(dateTimeStr);
-    return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  };
-
-  const toggleTaskExpansion = (taskName: string) => {
-    setExpandedTasks(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(taskName)) {
-        newSet.delete(taskName);
-      } else {
-        newSet.add(taskName);
-      }
-      return newSet;
-    });
-  };
-
-  // 週次/月次サマリー用の関数
-  const getWeekRange = (weekOffset: number) => {
-    const now = new Date();
-    const dayOfWeek = now.getDay();
-    const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // 月曜日始まり
-    const monday = new Date(now.setDate(diff + weekOffset * 7));
-    monday.setHours(0, 0, 0, 0);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    sunday.setHours(23, 59, 59, 999);
-    return {
-      start: monday.toISOString().split('T')[0],
-      end: sunday.toISOString().split('T')[0]
-    };
-  };
-
-  const getMonthRange = (monthOffset: number) => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + monthOffset;
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    return {
-      start: firstDay.toISOString().split('T')[0],
-      end: lastDay.toISOString().split('T')[0]
-    };
-  };
-
-  const loadPeriodSummary = useCallback(async () => {
-    try {
-      let range;
-      if (summaryViewMode === 'weekly') {
-        range = getWeekRange(currentWeekOffset);
-      } else if (summaryViewMode === 'monthly') {
-        range = getMonthRange(currentMonthOffset);
-      } else {
-        return; // daily mode
-      }
-      
-      const summary = await invoke<PeriodSummary[]>('get_summary_by_range', {
-        startDate: range.start,
-        endDate: range.end
-      });
-      setPeriodSummary(summary);
-    } catch (e) {
-      console.error('Failed to load period summary:', e);
-    }
-  }, [summaryViewMode, currentWeekOffset, currentMonthOffset]);
+    loadDailyRecords(selectedDate);
+  }, [selectedDate, loadDailyRecords]);
 
   useEffect(() => {
     if (summaryViewMode !== 'daily') {
-      loadPeriodSummary();
+      const range = summaryViewMode === 'weekly'
+        ? getWeekRange(currentWeekOffset)
+        : getMonthRange(currentMonthOffset);
+      loadPeriodSummary(range);
     }
   }, [summaryViewMode, currentWeekOffset, currentMonthOffset, loadPeriodSummary]);
 
-  const copyPeriodSummary = async () => {
-    try {
-      let range;
-      if (summaryViewMode === 'weekly') {
-        range = getWeekRange(currentWeekOffset);
-      } else if (summaryViewMode === 'monthly') {
-        range = getMonthRange(currentMonthOffset);
-      } else {
-        return;
-      }
-      
-      await invoke<string>('copy_period_summary_to_clipboard', {
-        startDate: range.start,
-        endDate: range.end
-      });
+  const handleStartTask = useCallback(async (taskId: string) => {
+    const success = await startTask(taskId);
+    if (success) {
+      await loadDailyRecords(selectedDate);
+    }
+  }, [startTask, loadDailyRecords, selectedDate]);
+
+  const handleStopTask = useCallback(async () => {
+    const success = await stopTask();
+    if (success) {
+      resetTimer();
+      await loadDailyRecords(selectedDate);
+    }
+  }, [stopTask, resetTimer, loadDailyRecords, selectedDate]);
+
+  const handleSaveEndWorkTime = useCallback(async () => {
+    if (settings) {
+      const newSettings = { ...settings, end_work_time: endWorkTime };
+      await saveSettings(newSettings);
+    }
+  }, [settings, endWorkTime, saveSettings]);
+
+  const handleDeleteAllData = useCallback(async (): Promise<boolean> => {
+    const success = await deleteAllData();
+    if (success) {
+      setShowDeleteConfirm(false);
+      resetTimer();
+      await loadDailyRecords(selectedDate);
+    }
+    return success;
+  }, [deleteAllData, resetTimer, loadDailyRecords, selectedDate]);
+
+  const handleCopySummary = useCallback(async () => {
+    const success = await copySummary(selectedDate);
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [copySummary, selectedDate]);
+
+  const handleCopyPeriodSummary = useCallback(async () => {
+    const range = summaryViewMode === 'weekly'
+      ? getWeekRange(currentWeekOffset)
+      : getMonthRange(currentMonthOffset);
+    const success = await copyPeriodSummary(range);
+    if (success) {
       setPeriodCopied(true);
       setTimeout(() => setPeriodCopied(false), 2000);
-    } catch (e) {
-      console.error('Failed to copy period summary:', e);
     }
-  };
+  }, [copyPeriodSummary, summaryViewMode, currentWeekOffset, currentMonthOffset]);
 
-  const getPeriodLabel = () => {
-    if (summaryViewMode === 'weekly') {
-      const range = getWeekRange(currentWeekOffset);
-      return `${range.start} ~ ${range.end}`;
-    } else if (summaryViewMode === 'monthly') {
-      const range = getMonthRange(currentMonthOffset);
-      const date = new Date(range.start);
-      return `${date.getFullYear()}年${date.getMonth() + 1}月`;
-    }
-    return '';
-  };
+  const handleDateChange = useCallback((date: string) => {
+    setSelectedDate(date);
+  }, []);
 
-  const colors = [
-    '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
-    '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
-  ];
+  const handleViewModeChange = useCallback((mode: SummaryViewMode) => {
+    setSummaryViewMode(mode);
+  }, []);
 
-  if (!settings) {
+  if (isLoading || !settings) {
     return <div className="loading">読み込み中...</div>;
   }
 
   return (
     <div className="app">
-      <header className="header">
-        <h1>作業時間記録</h1>
-        <button className="icon-btn" onClick={() => setShowSettings(!showSettings)}>
-          <Settings size={20} />
-        </button>
-      </header>
+      <Header onToggleSettings={() => setShowSettings(!showSettings)} />
 
-      <section className="current-task">
-        <div className="timer-display">
-          <Clock size={24} />
-          <span className="timer">{formatTime(elapsedTime)}</span>
-        </div>
-        {currentTask ? (
-          <div className="active-task">
-            <span className="task-name">{currentTask.task_name}</span>
-            <button className="stop-btn" onClick={stopTask}>
-              <Square size={18} /> 停止
-            </button>
-          </div>
-        ) : (
-          <div className="no-task">作業を選択してください</div>
-        )}
-      </section>
+      <TimerDisplay
+        elapsedTime={elapsedTime}
+        currentTask={currentTask}
+        onStopTask={handleStopTask}
+      />
 
       {!showSettings && (
-        <section className="task-list">
-          <h2>作業一覧</h2>
-          <div className="tasks">
-            {settings.tasks.map((task) => (
-              <button
-                key={task.id}
-                className={`task-btn ${currentTask?.task_id === task.id ? 'active' : ''}`}
-                onClick={() => startTask(task.id)}
-              >
-                <span className="task-index">{task.shortcut_index ? `Ctrl+Shift+${task.shortcut_index}` : ''}</span>
-                <span className="task-name">{task.name}</span>
-                <Play size={16} className="play-icon" />
-              </button>
-            ))}
-          </div>
-        </section>
+        <TaskList
+          tasks={settings.tasks}
+          currentTask={currentTask}
+          onStartTask={handleStartTask}
+        />
       )}
 
       {showSettings && (
-        <section className="settings">
-          <h2>設定</h2>
-          
-          <div className="setting-item">
-            <label>
-              <Bell size={16} /> 終業時刻リマインダー
-            </label>
-            <div className="time-input">
-              <input
-                type="time"
-                value={endWorkTime}
-                onChange={(e) => setEndWorkTime(e.target.value)}
-              />
-              <button onClick={saveEndWorkTime}>保存</button>
-            </div>
-          </div>
-
-          <div className="setting-item">
-            <label>作業一覧</label>
-            <div className="task-editor">
-              {settings.tasks.map((task) => (
-                <div key={task.id} className="task-edit-row">
-                  {editingTask?.id === task.id ? (
-                    <>
-                      <input
-                        type="text"
-                        value={editingTask.name}
-                        onChange={(e) => setEditingTask({ ...editingTask, name: e.target.value })}
-                      />
-                      <div className="color-picker">
-                        {colors.map((c) => (
-                          <button
-                            key={c}
-                            className={editingTask.color === c ? 'selected' : ''}
-                            style={{ backgroundColor: c }}
-                            onClick={() => setEditingTask({ ...editingTask, color: c })}
-                          />
-                        ))}
-                      </div>
-                      <button onClick={updateTask}><Check size={16} /></button>
-                      <button onClick={() => setEditingTask(null)}><X size={16} /></button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="task-name-display">
-                        {task.name}
-                      </span>
-                      <span className="shortcut-badge">
-                        {task.shortcut_index ? `Ctrl+Shift+${task.shortcut_index}` : '-'}
-                      </span>
-                      <button onClick={() => setEditingTask(task)}><Edit2 size={16} /></button>
-                      <button onClick={() => deleteTask(task.id)}><Trash2 size={16} /></button>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="setting-item">
-            <label>新規作業追加</label>
-            <div className="add-task-form">
-              <input
-                type="text"
-                placeholder="作業名"
-                value={newTaskName}
-                onChange={(e) => setNewTaskName(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && addTask()}
-              />
-              <div className="color-picker">
-                {colors.map((c) => (
-                  <button
-                    key={c}
-                    className={newTaskColor === c ? 'selected' : ''}
-                    style={{ backgroundColor: c }}
-                    onClick={() => setNewTaskColor(c)}
-                  />
-                ))}
-              </div>
-              <button onClick={addTask}>
-                <Plus size={16} /> 追加
-              </button>
-            </div>
-          </div>
-
-          <div className="setting-item danger-zone">
-            <label><AlertTriangle size={16} /> データ管理</label>
-            <button className="danger-btn" onClick={() => setShowDeleteConfirm(true)}>
-              <Trash2 size={16} /> 過去のデータを全削除
-            </button>
-          </div>
-        </section>
+        <SettingsPanel
+          settings={settings}
+          endWorkTime={endWorkTime}
+          showDeleteConfirm={showDeleteConfirm}
+          onEndWorkTimeChange={setEndWorkTime}
+          onSaveEndWorkTime={handleSaveEndWorkTime}
+          onAddTask={addTask}
+          onUpdateTask={updateTask}
+          onDeleteTask={deleteTask}
+          onShowDeleteConfirm={setShowDeleteConfirm}
+          onDeleteAllData={handleDeleteAllData}
+        />
       )}
 
-      {showDeleteConfirm && (
-        <div className="modal-overlay">
-          <div className="modal delete-confirm-modal">
-            <div className="modal-header">
-              <AlertTriangle size={24} className="warning-icon" />
-              <h3>警告</h3>
-            </div>
-            <div className="modal-body">
-              <p>すべての作業記録データが削除されます。</p>
-              <p className="warning-text">この操作は取り消せません。</p>
-            </div>
-            <div className="modal-actions">
-              <button className="cancel-btn" onClick={() => setShowDeleteConfirm(false)}>
-                キャンセル
-              </button>
-              <button className="confirm-delete-btn" onClick={deleteAllData}>
-                削除する
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SummaryView
+        viewMode={summaryViewMode}
+        dailyRecords={dailyRecords}
+        periodSummary={periodSummary}
+        selectedDate={selectedDate}
+        copied={copied}
+        periodCopied={periodCopied}
+        currentWeekOffset={currentWeekOffset}
+        currentMonthOffset={currentMonthOffset}
+        onViewModeChange={handleViewModeChange}
+        onDateChange={handleDateChange}
+        onCopySummary={handleCopySummary}
+        onCopyPeriodSummary={handleCopyPeriodSummary}
+        onWeekOffsetChange={setCurrentWeekOffset}
+        onMonthOffsetChange={setCurrentMonthOffset}
+        onUpdateRecordDetails={updateRecordDetails}
+        onDeleteRecord={deleteRecord}
+      />
 
-      <section className="daily-summary">
-        <div className="summary-header">
-          <h2>作業記録</h2>
-          <div className="view-tabs">
-            <button className={summaryViewMode === 'daily' ? 'active' : ''} onClick={() => setSummaryViewMode('daily')}>日次</button>
-            <button className={summaryViewMode === 'weekly' ? 'active' : ''} onClick={() => setSummaryViewMode('weekly')}>週次</button>
-            <button className={summaryViewMode === 'monthly' ? 'active' : ''} onClick={() => setSummaryViewMode('monthly')}>月次</button>
-          </div>
-        </div>
-        {summaryViewMode === 'daily' && (
-          <>
-            <div className="summary-header-row">
-              <div className="daily-date-row">
-                <span className="period-label">日付</span>
-                <input
-                  className="date-picker"
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => {
-                    setSelectedDate(e.target.value);
-                    setExpandedTasks(new Set());
-                    setEditingRecord(null);
-                    setRecordDetails('');
-                  }}
-                />
-              </div>
-              <button className={`copy-btn ${copied ? 'copied' : ''}`} onClick={copySummary}>
-                {copied ? <><Check size={16} /> コピー完了</> : <><Copy size={16} /> コピー</>}
-              </button>
-            </div>
-            <div className="summary-list">
-              {dailyRecords.length === 0 ? (
-                <div className="no-records">記録はありません</div>
-              ) : (
-                dailyRecords.map((taskRecord) => (
-                  <div key={taskRecord.task_name} className="task-record">
-                    <div className="summary-item clickable" onClick={() => toggleTaskExpansion(taskRecord.task_name)}>
-                      <div className="task-info">
-                        <ChevronDown size={16} className={`chevron ${expandedTasks.has(taskRecord.task_name) ? 'expanded' : ''}`} />
-                        <span className="name">{taskRecord.task_name}</span>
-                        <span className="record-count">({taskRecord.records.length}件)</span>
-                      </div>
-                      <span className="time">{formatDuration(taskRecord.total_seconds)}</span>
-                    </div>
-                    {expandedTasks.has(taskRecord.task_name) && (
-                      <div className="record-details">
-                        {taskRecord.records.map((record) => (
-                          <div key={record.id} className="record-item">
-                            {editingRecord?.taskName === taskRecord.task_name && editingRecord?.recordId === record.id ? (
-                              <div className="record-edit-form">
-                                <div className="record-time-row">
-                                  <span className="record-time">{formatDateTime(record.start_time)} - {record.end_time ? formatDateTime(record.end_time) : '進行中'}</span>
-                                  <span className="record-duration">{record.duration_seconds ? formatDuration(record.duration_seconds) : formatDuration(Math.floor((Date.now() - new Date(record.start_time).getTime()) / 1000))}</span>
-                                </div>
-                                <textarea className="record-details-input" placeholder="作業内容の詳細を入力..." value={recordDetails} onChange={(e) => setRecordDetails(e.target.value)} rows={2} />
-                                <div className="record-edit-actions">
-                                  <button onClick={() => saveRecordDetails(taskRecord.task_name, record.id)}><Check size={14} /> 保存</button>
-                                  <button onClick={cancelEditingRecord}><X size={14} /> キャンセル</button>
-                                </div>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="record-info-row">
-                                  <span className="record-time">{formatDateTime(record.start_time)} - {record.end_time ? formatDateTime(record.end_time) : '進行中'}</span>
-                                  <div className="record-actions">
-                                    <span className="record-duration">{record.duration_seconds ? formatDuration(record.duration_seconds) : formatDuration(Math.floor((Date.now() - new Date(record.start_time).getTime()) / 1000))}</span>
-                                    <button className="edit-record-btn" onClick={() => startEditingRecord(taskRecord.task_name, record)} title="詳細を編集"><Edit2 size={14} /></button>
-                                    {record.end_time && (
-                                      <button className="delete-record-btn" onClick={() => deleteRecord(selectedDate, record.id)} title="記録を削除"><Trash2 size={14} /></button>
-                                    )}
-                                  </div>
-                                </div>
-                                {record.details && <div className="record-details-text"><FileText size={12} /> {record.details}</div>}
-                              </>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        )}
-
-        {(summaryViewMode === 'weekly' || summaryViewMode === 'monthly') && (
-          <>
-            <div className="summary-header-row">
-              <div className="period-nav">
-                <button className="nav-btn" onClick={() => summaryViewMode === 'weekly' ? setCurrentWeekOffset(p => p - 1) : setCurrentMonthOffset(p => p - 1)}><ChevronLeft size={16} /></button>
-                <span className="period-label">{getPeriodLabel()}</span>
-                <button className="nav-btn" onClick={() => summaryViewMode === 'weekly' ? setCurrentWeekOffset(p => p + 1) : setCurrentMonthOffset(p => p + 1)}><ChevronRight size={16} /></button>
-              </div>
-              <button className={`copy-btn ${periodCopied ? 'copied' : ''}`} onClick={copyPeriodSummary}>
-                {periodCopied ? <><Check size={16} /> コピー完了</> : <><Copy size={16} /> コピー</>}
-              </button>
-            </div>
-            <div className="summary-list">
-              {periodSummary.length === 0 ? (
-                <div className="no-records">{summaryViewMode === 'weekly' ? 'この週の記録はありません' : 'この月の記録はありません'}</div>
-              ) : (
-                periodSummary.map((taskSummary) => (
-                  <div key={taskSummary.task_name} className="task-record">
-                    <div className="summary-item clickable" onClick={() => toggleTaskExpansion(taskSummary.task_name)}>
-                      <div className="task-info">
-                        <ChevronDown size={16} className={`chevron ${expandedTasks.has(taskSummary.task_name) ? 'expanded' : ''}`} />
-                        <span className="name">{taskSummary.task_name}</span>
-                      </div>
-                      <span className="time">{formatDuration(taskSummary.total_seconds)}</span>
-                    </div>
-                    {expandedTasks.has(taskSummary.task_name) && (
-                      <div className="record-details">
-                        {taskSummary.daily_breakdown.map((daily) => (
-                          <div key={daily.date} className="record-item period-daily-item">
-                            <span className="daily-date">{daily.date}</span>
-                            <span className="daily-time">{formatDuration(daily.total_seconds)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        )}
-      </section>
-
-      <footer className="shortcuts">
-        <div className="shortcut">
-          <kbd>Ctrl+Shift+S</kbd>
-          <span>停止</span>
-        </div>
-        <div className="shortcut">
-          <kbd>Ctrl+Shift+R</kbd>
-          <span>再開</span>
-        </div>
-        <div className="shortcut">
-          <kbd>Ctrl+Shift+1~9</kbd>
-          <span>作業切替</span>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }

@@ -116,17 +116,8 @@ fn load_daily_log(data_dir: &PathBuf, date: &str) -> DailyLog {
 
 fn save_daily_log(data_dir: &PathBuf, log: &DailyLog) -> Result<(), String> {
     let path = get_daily_log_path(data_dir, &log.date);
-    eprintln!("[DEBUG] Saving daily log to: {:?}", path);
-    eprintln!("[DEBUG] Data directory: {:?}", data_dir);
-    eprintln!("[DEBUG] Records count: {}", log.records.len());
-    let content = serde_json::to_string_pretty(log).map_err(|e| {
-        eprintln!("[DEBUG] JSON serialization error: {}", e);
-        e.to_string()
-    })?;
-    fs::write(&path, content).map_err(|e| {
-        eprintln!("[DEBUG] File write error: {}", e);
-        e.to_string()
-    })
+    let content = serde_json::to_string_pretty(log).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
