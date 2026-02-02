@@ -8,21 +8,32 @@ export interface DateRange {
 }
 
 /**
+ * Date オブジェクトをローカルタイムゾーンの YYYY-MM-DD 形式に変換
+ */
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * 週の範囲を取得（月曜日始まり）
  * @param weekOffset - 現在の週からのオフセット（0=今週、-1=先週、1=来週）
  */
 export function getWeekRange(weekOffset: number): DateRange {
   const now = new Date();
   const dayOfWeek = now.getDay();
+  // 月曜日を計算（日曜日は0なので-6、それ以外は+1で月曜日に）
   const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-  const monday = new Date(now.setDate(diff + weekOffset * 7));
+  const monday = new Date(now.getFullYear(), now.getMonth(), diff + weekOffset * 7);
   monday.setHours(0, 0, 0, 0);
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
   sunday.setHours(23, 59, 59, 999);
   return {
-    start: monday.toISOString().split('T')[0],
-    end: sunday.toISOString().split('T')[0]
+    start: formatLocalDate(monday),
+    end: formatLocalDate(sunday)
   };
 }
 
@@ -37,8 +48,8 @@ export function getMonthRange(monthOffset: number): DateRange {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   return {
-    start: firstDay.toISOString().split('T')[0],
-    end: lastDay.toISOString().split('T')[0]
+    start: formatLocalDate(firstDay),
+    end: formatLocalDate(lastDay)
   };
 }
 
@@ -46,11 +57,7 @@ export function getMonthRange(monthOffset: number): DateRange {
  * 今日の日付を YYYY-MM-DD 形式で取得
  */
 export function getToday(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return formatLocalDate(new Date());
 }
 
 /**

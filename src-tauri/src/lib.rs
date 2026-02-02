@@ -516,7 +516,7 @@ fn delete_all_data(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn get_summary_by_range(
     start_date: String,
     end_date: String,
@@ -594,7 +594,7 @@ fn get_summary_by_range(
     Ok(result)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn copy_period_summary_to_clipboard(
     start_date: String,
     end_date: String,
@@ -692,13 +692,15 @@ fn delete_record(
 }
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let modifier = if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" };
+    
     let menu = Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, "show", "表示", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "stop", "停止 (Ctrl+Shift+S)", true, None::<&str>)?,
-            &MenuItem::with_id(app, "restart", "再開 (Ctrl+Shift+R)", true, None::<&str>)?,
+            &MenuItem::with_id(app, "stop", &format!("停止 ({}+Shift+S)", modifier), true, None::<&str>)?,
+            &MenuItem::with_id(app, "restart", &format!("再開 ({}+Shift+R)", modifier), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "quit", "終了", true, None::<&str>)?,
         ],

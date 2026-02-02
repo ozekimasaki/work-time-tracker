@@ -33,8 +33,8 @@ export function useWorkRecords() {
   const loadPeriodSummary = useCallback(async (range: DateRange) => {
     try {
       const summary = await invoke<PeriodSummary[]>('get_summary_by_range', {
-        start_date: range.start,
-        end_date: range.end
+        startDate: range.start,
+        endDate: range.end
       });
       setPeriodSummary(summary);
       return summary;
@@ -79,8 +79,8 @@ export function useWorkRecords() {
   const copyPeriodSummary = useCallback(async (range: DateRange) => {
     try {
       await invoke<string>('copy_period_summary_to_clipboard', {
-        start_date: range.start,
-        end_date: range.end
+        startDate: range.start,
+        endDate: range.end
       });
       return true;
     } catch (e) {
