@@ -60,7 +60,7 @@ export function useSettings() {
   const deleteTask = useCallback(async (taskId: string) => {
     if (!confirm('この作業を削除しますか？')) return false;
     try {
-      await invoke('delete_task', { taskId });
+      await invoke('delete_task', { task_id: taskId });
       await loadSettings();
       return true;
     } catch (e) {

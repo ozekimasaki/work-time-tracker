@@ -33,8 +33,8 @@ export function useWorkRecords() {
   const loadPeriodSummary = useCallback(async (range: DateRange) => {
     try {
       const summary = await invoke<PeriodSummary[]>('get_summary_by_range', {
-        startDate: range.start,
-        endDate: range.end
+        start_date: range.start,
+        end_date: range.end
       });
       setPeriodSummary(summary);
       return summary;
@@ -79,8 +79,8 @@ export function useWorkRecords() {
   const copyPeriodSummary = useCallback(async (range: DateRange) => {
     try {
       await invoke<string>('copy_period_summary_to_clipboard', {
-        startDate: range.start,
-        endDate: range.end
+        start_date: range.start,
+        end_date: range.end
       });
       return true;
     } catch (e) {
@@ -93,26 +93,28 @@ export function useWorkRecords() {
     try {
       await invoke('update_record_details', {
         date,
-        recordId,
+        record_id: recordId,
         details: details?.trim() || null
       });
+      await loadDailyRecords(date);
       return true;
     } catch (e) {
       console.error('Failed to update record details:', e);
       return false;
     }
-  }, []);
+  }, [loadDailyRecords]);
 
   const deleteRecord = useCallback(async (date: string, recordId: string) => {
     if (!confirm('この記録を削除しますか？')) return false;
     try {
-      await invoke('delete_record', { date, recordId });
+      await invoke('delete_record', { date, record_id: recordId });
+      await loadDailyRecords(date);
       return true;
     } catch (e) {
       console.error('Failed to delete record:', e);
       return false;
     }
-  }, []);
+  }, [loadDailyRecords]);
 
   return {
     currentTask,

@@ -23,20 +23,6 @@
       "csp": null
     }
   },
-  "plugins": {
-    "globalShortcut": {
-      "shortcuts": [
-        {
-          "shortcut": "Ctrl+Shift+S",
-          "kind": "stopTask"
-        },
-        {
-          "shortcut": "Ctrl+Shift+R",
-          "kind": "restartTask"
-        }
-      ]
-    }
-  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],

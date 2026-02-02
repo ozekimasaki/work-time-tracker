@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, State, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_notification::NotificationExt;
@@ -140,7 +140,7 @@ fn save_settings_command(
 
 #[tauri::command]
 fn start_task(
-    task_id: String,
+    taskId: String,
     state: State<AppState>,
 ) -> Result<WorkRecord, String> {
     let data_dir = state.data_dir.lock().map_err(|e| e.to_string())?;
@@ -161,13 +161,13 @@ fn start_task(
     let task_name = settings
         .tasks
         .iter()
-        .find(|t| t.id == task_id)
+        .find(|t| t.id == taskId)
         .map(|t| t.name.clone())
         .unwrap_or_else(|| "不明".to_string());
     
     let new_record = WorkRecord {
         id: format!("{}", chrono::Local::now().timestamp_millis()),
-        task_id: task_id.clone(),
+        task_id: taskId.clone(),
         task_name,
         start_time: Local::now(),
         end_time: None,
@@ -178,7 +178,7 @@ fn start_task(
     *current = Some(new_record.clone());
     
     let mut last = state.last_task_id.lock().map_err(|e| e.to_string())?;
-    *last = Some(task_id);
+    *last = Some(taskId);
     
     Ok(new_record)
 }
@@ -733,7 +733,9 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     };
                     if let Some(id) = task_id {
                         let state = app_handle.state::<AppState>();
-                        let _ = start_task(id, state);
+                        if start_task(id, state).is_ok() {
+                            app_handle.emit("task-changed", ()).ok();
+                        }
                     }
                 });
             }
@@ -764,35 +766,81 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use tauri_plugin_global_shortcut::Shortcut;
+    use tauri_plugin_global_shortcut::ShortcutState;
     
+    let global_shortcut = app.global_shortcut();
+    println!("[グローバルショートカット] セットアップ開始");
+
     // Ctrl+Shift+S - 停止
     let shortcut_s: Shortcut = "Ctrl+Shift+S".parse()?;
     let app_handle = app.clone();
-    app.global_shortcut().on_shortcut(shortcut_s, move |_app, _shortcut, _event| {
+    match global_shortcut.register(shortcut_s.clone()) {
+        Ok(_) => println!("[グローバルショートカット] Ctrl+Shift+S 登録成功"),
+        Err(e) => println!("[グローバルショートカット] Ctrl+Shift+S 登録失敗: {:?}", e),
+    }
+    global_shortcut.on_shortcut(shortcut_s, move |_app, _shortcut, event| {
+        if event.state != ShortcutState::Pressed {
+            return;
+        }
+        println!("[ショートカット] Ctrl+Shift+S が検出されました");
         let state = app_handle.state::<AppState>();
-        let _ = stop_task(state);
-    })?;
+        match stop_task(state) {
+            Ok(_) => {
+                println!("[ショートカット] stop_task 成功");
+                app_handle.emit("task-changed", ()).ok();
+                println!("[ショートカット] task-changed イベント発行完了");
+            }
+            Err(e) => println!("[ショートカット] stop_task 失敗: {}", e),
+        }
+    }).ok();
     
     // Ctrl+Shift+R - 再開
     let shortcut_r: Shortcut = "Ctrl+Shift+R".parse()?;
     let app_handle = app.clone();
-    app.global_shortcut().on_shortcut(shortcut_r, move |_app, _shortcut, _event| {
+    match global_shortcut.register(shortcut_r.clone()) {
+        Ok(_) => println!("[グローバルショートカット] Ctrl+Shift+R 登録成功"),
+        Err(e) => println!("[グローバルショートカット] Ctrl+Shift+R 登録失敗: {:?}", e),
+    }
+    global_shortcut.on_shortcut(shortcut_r, move |_app, _shortcut, event| {
+        if event.state != ShortcutState::Pressed {
+            return;
+        }
+        println!("[ショートカット] Ctrl+Shift+R が検出されました");
         let state = app_handle.state::<AppState>();
         let task_id = {
             let last_id = state.last_task_id.lock();
             last_id.ok().and_then(|guard| guard.clone())
         };
+        println!("[ショートカット] last_task_id: {:?}", task_id);
         if let Some(id) = task_id {
+            println!("[ショートカット] start_task を呼び出します");
             let state = app_handle.state::<AppState>();
-            let _ = start_task(id, state);
+            match start_task(id, state) {
+                Ok(_) => {
+                    println!("[ショートカット] start_task 成功");
+                    app_handle.emit("task-changed", ()).ok();
+                    println!("[ショートカット] task-changed イベント発行完了");
+                }
+                Err(e) => println!("[ショートカット] start_task 失敗: {}", e),
+            }
+        } else {
+            println!("[ショートカット] last_task_id が見つかりません");
         }
-    })?;
+    }).ok();
     
     // Ctrl+Shift+1~9 - 作業切替
     for i in 1..=9 {
         let shortcut: Shortcut = format!("Ctrl+Shift+{}", i).parse()?;
         let app_handle = app.clone();
-        app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, _event| {
+        match global_shortcut.register(shortcut.clone()) {
+            Ok(_) => println!("[グローバルショートカット] Ctrl+Shift+{} 登録成功", i),
+            Err(e) => println!("[グローバルショートカット] Ctrl+Shift+{} 登録失敗: {:?}", i, e),
+        }
+        global_shortcut.on_shortcut(shortcut, move |_app, _shortcut, event| {
+            if event.state != ShortcutState::Pressed {
+                return;
+            }
+            println!("[ショートカット] Ctrl+Shift+{} が検出されました", i);
             let state = app_handle.state::<AppState>();
             let task_id = {
                 let settings = state.settings.lock();
@@ -800,13 +848,25 @@ fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Err
                     s.tasks.iter().find(|t| t.shortcut_index == Some(i)).map(|t| t.id.clone())
                 })
             };
+            println!("[ショートカット] shortcut_index={} の task_id: {:?}", i, task_id);
             if let Some(id) = task_id {
+                println!("[ショートカット] start_task を呼び出します");
                 let state = app_handle.state::<AppState>();
-                let _ = start_task(id, state);
+                match start_task(id, state) {
+                    Ok(_) => {
+                        println!("[ショートカット] start_task 成功");
+                        app_handle.emit("task-changed", ()).ok();
+                        println!("[ショートカット] task-changed イベント発行完了");
+                    }
+                    Err(e) => println!("[ショートカット] start_task 失敗: {}", e),
+                }
+            } else {
+                println!("[ショートカット] shortcut_index={} に対応するタスクが見つかりません", i);
             }
-        })?;
+        }).ok();
     }
     
+    println!("[グローバルショートカット] セットアップ完了");
     Ok(())
 }
 

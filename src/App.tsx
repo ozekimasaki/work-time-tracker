@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { useSettings } from './hooks/useSettings';
 import { useWorkRecords } from './hooks/useWorkRecords';
 import { useTimer } from './hooks/useTimer';
@@ -27,6 +28,7 @@ function App() {
     currentTask,
     dailyRecords,
     periodSummary,
+    loadCurrentTask,
     loadDailyRecords,
     loadPeriodSummary,
     startTask,
@@ -58,6 +60,20 @@ function App() {
   useEffect(() => {
     loadDailyRecords(selectedDate);
   }, [selectedDate, loadDailyRecords]);
+
+  useEffect(() => {
+    const unlisten = listen('task-changed', async () => {
+      console.log('[フロントエンド] task-changed イベントを受信しました');
+      console.log('[フロントエンド] loadCurrentTask() を呼び出します');
+      await loadCurrentTask();
+      console.log('[フロントエンド] loadDailyRecords() を呼び出します');
+      await loadDailyRecords(selectedDate);
+      console.log('[フロントエンド] UI更新完了');
+    });
+    return () => {
+      unlisten.then(fn => fn());
+    };
+  }, [loadCurrentTask, loadDailyRecords, selectedDate]);
 
   useEffect(() => {
     if (summaryViewMode !== 'daily') {
