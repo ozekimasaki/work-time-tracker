@@ -24,13 +24,22 @@ jobs:
         run: npm install
 
       - name: Build Tauri app
-        run: npm run tauri build
+        uses: tauri-apps/tauri-action@v0
+        with:
+          tagName: __VERSION__
+          releaseName: "作業時間記録 v__VERSION__"
+          releaseBody: "See the assets to download this version and install."
+          releaseDraft: true
+          prerelease: false
+          includeRelease: false
+          includeDebug: false
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: work-time-tracker-windows
           path: src-tauri/target/release/bundle/msi/*.msi
+        if: always()
 
   build-macos:
     runs-on: macos-latest
@@ -49,7 +58,15 @@ jobs:
         run: npm install
 
       - name: Build Tauri app
-        run: npm run tauri build
+        uses: tauri-apps/tauri-action@v0
+        with:
+          tagName: __VERSION__
+          releaseName: "作業時間記録 v__VERSION__"
+          releaseBody: "See the assets to download this version and install."
+          releaseDraft: true
+          prerelease: false
+          includeRelease: false
+          includeDebug: false
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -58,6 +75,7 @@ jobs:
           path: |
             src-tauri/target/release/bundle/app/*.app
             src-tauri/target/release/bundle/dmg/*.dmg
+        if: always()
 
   release:
     needs: [build-windows, build-macos]
