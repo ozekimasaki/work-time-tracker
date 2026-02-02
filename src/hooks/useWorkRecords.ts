@@ -93,7 +93,7 @@ export function useWorkRecords() {
     try {
       await invoke('update_record_details', {
         date,
-        record_id: recordId,
+        recordId,
         details: details?.trim() || null
       });
       await loadDailyRecords(date);
@@ -107,7 +107,7 @@ export function useWorkRecords() {
   const deleteRecord = useCallback(async (date: string, recordId: string) => {
     if (!confirm('この記録を削除しますか？')) return false;
     try {
-      await invoke('delete_record', { date, record_id: recordId });
+      await invoke('delete_record', { date, recordId });
       await loadDailyRecords(date);
       return true;
     } catch (e) {

@@ -8,7 +8,6 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_notification::NotificationExt;
 
 // データ構造
@@ -655,7 +654,7 @@ fn copy_period_summary_to_clipboard(
 #[tauri::command]
 fn update_record_details(
     date: String,
-    record_id: String,
+    recordId: String,
     details: Option<String>,
     state: State<AppState>,
 ) -> Result<(), String> {
@@ -663,7 +662,7 @@ fn update_record_details(
     let mut log = load_daily_log(&data_dir, &date);
     
     // 該当する記録を検索して更新
-    if let Some(record) = log.records.iter_mut().find(|r| r.id == record_id) {
+    if let Some(record) = log.records.iter_mut().find(|r| r.id == recordId) {
         record.details = details;
         save_daily_log(&data_dir, &log)?;
         Ok(())
@@ -675,14 +674,14 @@ fn update_record_details(
 #[tauri::command]
 fn delete_record(
     date: String,
-    record_id: String,
+    recordId: String,
     state: State<AppState>,
 ) -> Result<(), String> {
     let data_dir = state.data_dir.lock().map_err(|e| e.to_string())?;
     let mut log = load_daily_log(&data_dir, &date);
     
     let before_len = log.records.len();
-    log.records.retain(|r| r.id != record_id);
+    log.records.retain(|r| r.id != recordId);
     
     if log.records.len() == before_len {
         return Err("Record not found".to_string());
@@ -764,112 +763,6 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    use tauri_plugin_global_shortcut::Shortcut;
-    use tauri_plugin_global_shortcut::ShortcutState;
-    
-    let global_shortcut = app.global_shortcut();
-    println!("[グローバルショートカット] セットアップ開始");
-
-    // Ctrl+Shift+S - 停止
-    let shortcut_s: Shortcut = "Ctrl+Shift+S".parse()?;
-    let app_handle = app.clone();
-    match global_shortcut.register(shortcut_s.clone()) {
-        Ok(_) => println!("[グローバルショートカット] Ctrl+Shift+S 登録成功"),
-        Err(e) => println!("[グローバルショートカット] Ctrl+Shift+S 登録失敗: {:?}", e),
-    }
-    global_shortcut.on_shortcut(shortcut_s, move |_app, _shortcut, event| {
-        if event.state != ShortcutState::Pressed {
-            return;
-        }
-        println!("[ショートカット] Ctrl+Shift+S が検出されました");
-        let state = app_handle.state::<AppState>();
-        match stop_task(state) {
-            Ok(_) => {
-                println!("[ショートカット] stop_task 成功");
-                app_handle.emit("task-changed", ()).ok();
-                println!("[ショートカット] task-changed イベント発行完了");
-            }
-            Err(e) => println!("[ショートカット] stop_task 失敗: {}", e),
-        }
-    }).ok();
-    
-    // Ctrl+Shift+R - 再開
-    let shortcut_r: Shortcut = "Ctrl+Shift+R".parse()?;
-    let app_handle = app.clone();
-    match global_shortcut.register(shortcut_r.clone()) {
-        Ok(_) => println!("[グローバルショートカット] Ctrl+Shift+R 登録成功"),
-        Err(e) => println!("[グローバルショートカット] Ctrl+Shift+R 登録失敗: {:?}", e),
-    }
-    global_shortcut.on_shortcut(shortcut_r, move |_app, _shortcut, event| {
-        if event.state != ShortcutState::Pressed {
-            return;
-        }
-        println!("[ショートカット] Ctrl+Shift+R が検出されました");
-        let state = app_handle.state::<AppState>();
-        let task_id = {
-            let last_id = state.last_task_id.lock();
-            last_id.ok().and_then(|guard| guard.clone())
-        };
-        println!("[ショートカット] last_task_id: {:?}", task_id);
-        if let Some(id) = task_id {
-            println!("[ショートカット] start_task を呼び出します");
-            let state = app_handle.state::<AppState>();
-            match start_task(id, state) {
-                Ok(_) => {
-                    println!("[ショートカット] start_task 成功");
-                    app_handle.emit("task-changed", ()).ok();
-                    println!("[ショートカット] task-changed イベント発行完了");
-                }
-                Err(e) => println!("[ショートカット] start_task 失敗: {}", e),
-            }
-        } else {
-            println!("[ショートカット] last_task_id が見つかりません");
-        }
-    }).ok();
-    
-    // Ctrl+Shift+1~9 - 作業切替
-    for i in 1..=9 {
-        let shortcut: Shortcut = format!("Ctrl+Shift+{}", i).parse()?;
-        let app_handle = app.clone();
-        match global_shortcut.register(shortcut.clone()) {
-            Ok(_) => println!("[グローバルショートカット] Ctrl+Shift+{} 登録成功", i),
-            Err(e) => println!("[グローバルショートカット] Ctrl+Shift+{} 登録失敗: {:?}", i, e),
-        }
-        global_shortcut.on_shortcut(shortcut, move |_app, _shortcut, event| {
-            if event.state != ShortcutState::Pressed {
-                return;
-            }
-            println!("[ショートカット] Ctrl+Shift+{} が検出されました", i);
-            let state = app_handle.state::<AppState>();
-            let task_id = {
-                let settings = state.settings.lock();
-                settings.ok().and_then(|s| {
-                    s.tasks.iter().find(|t| t.shortcut_index == Some(i)).map(|t| t.id.clone())
-                })
-            };
-            println!("[ショートカット] shortcut_index={} の task_id: {:?}", i, task_id);
-            if let Some(id) = task_id {
-                println!("[ショートカット] start_task を呼び出します");
-                let state = app_handle.state::<AppState>();
-                match start_task(id, state) {
-                    Ok(_) => {
-                        println!("[ショートカット] start_task 成功");
-                        app_handle.emit("task-changed", ()).ok();
-                        println!("[ショートカット] task-changed イベント発行完了");
-                    }
-                    Err(e) => println!("[ショートカット] start_task 失敗: {}", e),
-                }
-            } else {
-                println!("[ショートカット] shortcut_index={} に対応するタスクが見つかりません", i);
-            }
-        }).ok();
-    }
-    
-    println!("[グローバルショートカット] セットアップ完了");
-    Ok(())
-}
-
 fn setup_reminder(app: &AppHandle) {
     let app_handle = app.clone();
     
@@ -915,7 +808,92 @@ fn setup_reminder(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcuts([
+                    "Ctrl+Shift+S",
+                    "Ctrl+Shift+R",
+                    "Ctrl+Shift+1",
+                    "Ctrl+Shift+2",
+                    "Ctrl+Shift+3",
+                    "Ctrl+Shift+4",
+                    "Ctrl+Shift+5",
+                    "Ctrl+Shift+6",
+                    "Ctrl+Shift+7",
+                    "Ctrl+Shift+8",
+                    "Ctrl+Shift+9",
+                ])
+                .expect("Failed to register shortcuts")
+                .with_handler(|app, shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        let shortcut_str = shortcut.into_string();
+                        println!("[ショートカット] {} が検出されました", shortcut_str);
+                        
+                        let state = app.state::<AppState>();
+                        
+                        match shortcut_str.as_str() {
+                            "shift+control+KeyS" => {
+                                println!("[ショートカット] 停止処理を実行");
+                                match stop_task(state) {
+                                    Ok(_) => {
+                                        println!("[ショートカット] stop_task 成功");
+                                        let _ = app.emit("task-changed", ());
+                                        println!("[ショートカット] task-changed イベント発行完了");
+                                    }
+                                    Err(e) => println!("[ショートカット] stop_task 失敗: {}", e),
+                                }
+                            }
+                            "shift+control+KeyR" => {
+                                println!("[ショートカット] 再開処理を実行");
+                                let task_id = {
+                                    let last_id = state.last_task_id.lock();
+                                    last_id.ok().and_then(|guard| guard.clone())
+                                };
+                                println!("[ショートカット] last_task_id: {:?}", task_id);
+                                if let Some(id) = task_id {
+                                    match start_task(id, state) {
+                                        Ok(_) => {
+                                            println!("[ショートカット] start_task 成功");
+                                            let _ = app.emit("task-changed", ());
+                                            println!("[ショートカット] task-changed イベント発行完了");
+                                        }
+                                        Err(e) => println!("[ショートカット] start_task 失敗: {}", e),
+                                    }
+                                } else {
+                                    println!("[ショートカット] last_task_id が見つかりません");
+                                }
+                            }
+                            "shift+control+Digit1" | "shift+control+Digit2" | "shift+control+Digit3" | 
+                            "shift+control+Digit4" | "shift+control+Digit5" | "shift+control+Digit6" | 
+                            "shift+control+Digit7" | "shift+control+Digit8" | "shift+control+Digit9" => {
+                                let index = shortcut_str.chars().last().unwrap().to_digit(10).unwrap() as u8;
+                                println!("[ショートカット] 作業切替 index={}", index);
+                                let task_id = {
+                                    let settings = state.settings.lock();
+                                    settings.ok().and_then(|s| {
+                                        s.tasks.iter().find(|t| t.shortcut_index == Some(index)).map(|t| t.id.clone())
+                                    })
+                                };
+                                println!("[ショートカット] shortcut_index={} の task_id: {:?}", index, task_id);
+                                if let Some(id) = task_id {
+                                    match start_task(id, state) {
+                                        Ok(_) => {
+                                            println!("[ショートカット] start_task 成功");
+                                            let _ = app.emit("task-changed", ());
+                                            println!("[ショートカット] task-changed イベント発行完了");
+                                        }
+                                        Err(e) => println!("[ショートカット] start_task 失敗: {}", e),
+                                    }
+                                } else {
+                                    println!("[ショートカット] shortcut_index={} に対応するタスクが見つかりません", index);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .manage(AppState {
@@ -942,7 +920,6 @@ pub fn run() {
             }
             
             setup_tray(&app_handle)?;
-            setup_global_shortcuts(&app_handle)?;
             setup_reminder(&app_handle);
             
             if let Some(window) = app_handle.get_webview_window("main") {
